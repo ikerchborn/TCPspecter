@@ -1,0 +1,38 @@
+# Virtual environment
+venv/
+
+# Python cache and bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Sensitive credentials
+config.json
+
+# Local scratch/test scripts
+verify_core.py
+verify_v2.py
+
+# Generated reports/output files
+*.csv
+reporte.json
+reporte.csv
+
+# Editors/System files
+.vscode/
+.idea/
+.DS_Store
+*.log
+*.tmp
+
+# EXPLICIT INCLUSIONS: Ensure configuration templates and core components are never ignored
+!config.json.template
+!requirements.txt
+!run.sh
+!styles.css
+!app.py
+!core/
+!screens/
+!widgets/
+!README.md

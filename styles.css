@@ -1,0 +1,232 @@
+/* 
+   TCPspecter UI Styling Stylesheet
+   Strict Monochromatic Theme + Crema/Azul Accents
+   Forbidden: Unicode round/solid borders
+*/
+
+Screen {
+    background: #1A1A1A;
+    color: #E0E0E0;
+    layout: vertical;
+    height: 100%;
+}
+
+Header {
+    background: #111111;
+    color: #E0E0E0;
+    text-style: bold;
+    border-bottom: ascii #444444;
+    dock: top;
+    height: 1;
+}
+
+Footer {
+    background: #111111;
+    color: #888888;
+    border-top: ascii #444444;
+    dock: bottom;
+    height: 1;
+}
+
+#dashboard_panel {
+    height: 11;
+    background: #1A1A1A;
+    border-bottom: ascii #444444;
+    padding: 0 1;
+}
+
+#dashboard_row {
+    layout: grid;
+    grid-size: 4 1;
+    grid-columns: 2fr 3fr 3fr 3fr;
+    height: 100%;
+}
+
+#stats_bars {
+    align: left middle;
+    height: 100%;
+    padding-top: 1;
+}
+
+#net_sparkline {
+    color: #888888;
+    padding-top: 1;
+}
+
+#filter_panel {
+    display: none;
+    height: auto;
+    border-bottom: ascii #444444;
+    background: #1C1C1C;
+    padding: 0 1;
+}
+
+#filter_container {
+    layout: grid;
+    grid-size: 2 1;
+    grid-columns: 3fr 1fr;
+    align: left middle;
+    height: 100%;
+}
+
+#search_input {
+    background: #111111;
+    color: #E0E0E0;
+    border: ascii #444444;
+}
+
+#proto_indicator {
+    content-align: right middle;
+    color: #888888;
+    padding-right: 2;
+}
+
+#central_grids {
+    height: 1fr;
+}
+
+#process_pane {
+    display: none;
+}
+
+#connection_pane {
+    width: 100%;
+    height: 100%;
+    padding: 0 1;
+}
+
+.panel_title {
+    color: #888888;
+    padding: 0 1;
+    text-style: bold;
+}
+
+#security_status_bar {
+    height: 1;
+    background: #0d1117;
+    color: #888888;
+    border-top: ascii #333333;
+    content-align: left middle;
+    padding: 0 2;
+}
+
+#security_status_bar.sec-on {
+    color: #34d399;
+}
+
+#security_status_bar.sec-off {
+    color: #888888;
+}
+
+DataTable {
+    background: #1A1A1A;
+    color: #E0E0E0;
+    border: ascii #444444;
+    height: 1fr;
+}
+
+DataTable > .datatable--header {
+    background: #252525;
+    color: #E0E0E0;
+    text-style: bold;
+}
+
+DataTable > .datatable--cursor {
+    background: #333333;
+    color: #FFFFFF;
+    text-style: bold;
+}
+
+#details_drawer {
+    height: 3;
+    background: #151515;
+    color: #888888;
+    border-top: ascii #444444;
+    content-align: left middle;
+    padding: 0 1;
+}
+
+/* Modals styling configuration */
+BaseAsciiModal {
+    align: center middle;
+    background: rgba(0,0,0,0.6);
+}
+
+#modal_dialog {
+    background: #222222;
+    color: #E0E0E0;
+    border: ascii #888888;
+    padding: 1 2;
+    width: 60;
+    height: auto;
+}
+
+#modal_dialog_wide {
+    background: #222222;
+    color: #E0E0E0;
+    border: ascii #888888;
+    padding: 1 2;
+    width: 80;
+    height: auto;
+}
+
+#export_path_input {
+    background: #111111;
+    color: #E0E0E0;
+    border: ascii #444444;
+    margin: 1 0;
+}
+
+#zombie_dialog {
+    background: #222222;
+    color: #E0E0E0;
+    border: ascii #888888;
+    padding: 1 2;
+    width: 80;
+    height: 25;
+    overflow-y: scroll;
+}
+
+#c2_security_widget {
+    background: #1A1A1A;
+    color: #E0E0E0;
+    border: ascii #444444;
+    padding: 1 1;
+    content-align: center middle;
+}
+
+#world_map_dialog {
+    background: #222222;
+    border: double #4a7a9d;
+    padding: 1 2;
+}
+
+/* --- Explanation Engine Panel --- */
+#explanation_container {
+    height: 12;
+    border: round #4A7A9D;
+    background: #080C14;
+    padding: 0 1;
+    margin-top: 1;
+}
+
+
+
+.panel_subtitle {
+    color: #fbbf24;
+    text-style: bold;
+    margin-top: 1;
+}
+
+.expl_text {
+    color: #f3f4f6;
+}
+
+#expl_split {
+    height: 1fr;
+}
+
+#expl_rec_box, #expl_edu_box {
+    width: 50%;
+    padding-right: 2;
+}

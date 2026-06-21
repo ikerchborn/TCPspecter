@@ -1,0 +1,1149 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TCPspecter - Panel de Control Gráfico</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+    <style>
+        :root {
+            --bg-color: #080c14;
+            --card-bg: rgba(17, 24, 39, 0.7);
+            --card-border: rgba(255, 255, 255, 0.06);
+            --text-main: #f3f4f6;
+            --text-muted: #9ca3af;
+            --primary: #4a7a9d;
+            --accent: #f2e8c9;
+            --danger: #f87171;
+            --warning: #fbbf24;
+            --success: #34d399;
+            --shadow: rgba(0, 0, 0, 0.4);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Outfit', sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            background-image: radial-gradient(circle at 10% 20%, rgba(74, 122, 157, 0.08) 0%, transparent 40%),
+                              radial-gradient(circle at 90% 80%, rgba(242, 232, 201, 0.05) 0%, transparent 40%);
+            color: var(--text-main);
+            min-height: 100vh;
+            padding: 24px;
+            overflow-x: hidden;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--card-border);
+        }
+
+        .logo-section h1 {
+            font-size: 28px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            color: var(--text-main);
+        }
+
+        .logo-section h1 span {
+            color: var(--primary);
+        }
+
+        .logo-section p {
+            font-size: 13px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        .status-badge {
+            background: rgba(52, 211, 153, 0.15);
+            border: 1px solid var(--success);
+            color: var(--success);
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            background-color: var(--success);
+            border-radius: 50%;
+            display: inline-block;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.9); opacity: 0.6; }
+            50% { transform: scale(1.2); opacity: 1; }
+            100% { transform: scale(0.9); opacity: 0.6; }
+        }
+
+        /* Dashboard Grid Layout */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 20px;
+            margin-bottom: 24px;
+        }
+
+        .card {
+            background: var(--card-bg);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--card-border);
+            border-radius: 16px;
+            padding: 20px;
+            box-shadow: 0 10px 30px var(--shadow);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.6);
+        }
+
+        .card-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-muted);
+            margin-bottom: 16px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        /* Large Stats Grid (Gauges / Charts) */
+        .grid-span-2 {
+            grid-column: span 2;
+        }
+
+        .grid-span-3 {
+            grid-column: span 3;
+        }
+
+        /* Chart Canvas Sizing */
+        .chart-container {
+            position: relative;
+            height: 150px;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .chart-container-large {
+            position: relative;
+            height: 220px;
+            width: 100%;
+        }
+
+        /* Security Dashboard Alert styles */
+        .security-score-container {
+            display: flex;
+            align-items: center;
+            justify-content: space-around;
+            height: 100%;
+        }
+
+        .score-circle {
+            position: relative;
+            width: 110px;
+            height: 110px;
+            border-radius: 50%;
+            background: conic-gradient(var(--primary) 0%, #1e293b 0%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.5);
+        }
+
+        .score-circle-inner {
+            width: 92px;
+            height: 92px;
+            background: #0f172a;
+            border-radius: 50%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .score-num {
+            font-size: 26px;
+            font-weight: 700;
+        }
+
+        .score-lbl {
+            font-size: 10px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+        }
+
+        .security-details {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            flex: 1;
+            margin-left: 20px;
+        }
+
+        .detail-item {
+            font-size: 14px;
+        }
+
+        .detail-value {
+            font-weight: 700;
+            font-size: 16px;
+        }
+
+        .severity-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .sev-bajo { background: rgba(52, 211, 153, 0.15); color: var(--success); }
+        .sev-medio { background: rgba(74, 122, 157, 0.15); color: var(--primary); }
+        .sev-alto { background: rgba(251, 191, 36, 0.15); color: var(--warning); }
+        .sev-critico { background: rgba(248, 113, 113, 0.15); color: var(--danger); }
+
+        /* Security Formula Explanation */
+        .formula-card {
+            background: rgba(30, 41, 59, 0.4);
+            border-radius: 12px;
+            padding: 12px;
+            font-size: 12px;
+            line-height: 1.5;
+            color: var(--text-muted);
+            border: 1px dashed rgba(255,255,255,0.05);
+        }
+
+        .formula-card strong {
+            color: var(--text-main);
+        }
+
+        /* Connections section */
+        .connections-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .connections-title h2 {
+            font-size: 20px;
+            font-weight: 600;
+        }
+
+        .search-box {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .search-input {
+            background: rgba(17, 24, 39, 0.8);
+            border: 1px solid var(--card-border);
+            border-radius: 10px;
+            padding: 8px 16px;
+            color: var(--text-main);
+            outline: none;
+            width: 300px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        .search-input:focus {
+            border-color: var(--primary);
+        }
+
+        /* Connections Table styling */
+        .table-container {
+            overflow-x: auto;
+            border-radius: 12px;
+            border: 1px solid var(--card-border);
+            max-height: 500px;
+            overflow-y: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+            font-size: 14px;
+        }
+
+        thead {
+            position: sticky;
+            top: 0;
+            background: #111827;
+            z-index: 10;
+        }
+
+        th {
+            padding: 14px 16px;
+            font-weight: 600;
+            color: var(--text-muted);
+            border-bottom: 1px solid var(--card-border);
+            text-transform: uppercase;
+            font-size: 11px;
+            letter-spacing: 0.5px;
+        }
+
+        td {
+            padding: 12px 16px;
+            border-bottom: 1px solid rgba(255,255,255,0.02);
+            color: #d1d5db;
+        }
+
+        tr {
+            transition: background-color 0.2s;
+            cursor: pointer;
+        }
+
+        tr:hover {
+            background-color: rgba(255, 255, 255, 0.02);
+        }
+
+        .badge-status {
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .badge-established { background: rgba(52, 211, 153, 0.15); color: var(--success); }
+        .badge-listen { background: rgba(74, 122, 157, 0.15); color: var(--primary); }
+        .badge-other { background: rgba(156, 163, 175, 0.15); color: var(--text-muted); }
+
+        /* Dialog Modal styling for interpretations */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(8px);
+            z-index: 100;
+            justify-content: center;
+            align-items: center;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .modal.active {
+            display: flex;
+            opacity: 1;
+        }
+
+        .modal-content {
+            background: #0d131f;
+            border: 1px solid var(--card-border);
+            border-radius: 20px;
+            width: 550px;
+            padding: 28px;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.8);
+            transform: scale(0.9);
+            transition: transform 0.3s ease;
+            position: relative;
+        }
+
+        .modal.active .modal-content {
+            transform: scale(1);
+        }
+
+        .close-btn {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            font-size: 24px;
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: color 0.2s;
+        }
+
+        .close-btn:hover {
+            color: var(--text-main);
+        }
+
+        .modal-header {
+            margin-bottom: 20px;
+        }
+
+        .modal-header h3 {
+            font-size: 22px;
+            font-weight: 700;
+            color: var(--text-main);
+        }
+
+        .modal-body {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .info-block {
+            background: rgba(255,255,255,0.02);
+            border-radius: 12px;
+            padding: 14px;
+            border-left: 4px solid var(--primary);
+        }
+
+        .info-block.block-danger {
+            border-left-color: var(--danger);
+            background: rgba(248, 113, 113, 0.03);
+        }
+
+        .info-block h4 {
+            font-size: 13px;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+            letter-spacing: 0.5px;
+        }
+
+        .info-block p {
+            font-size: 15px;
+            line-height: 1.5;
+            color: var(--text-main);
+        }
+
+        .interpret-banner {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-weight: 700;
+            font-size: 15px;
+            padding: 10px 14px;
+            border-radius: 8px;
+            margin-bottom: 8px;
+        }
+
+        /* Bandwidth Line Chart Grid */
+        .bottom-section {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 20px;
+            margin-top: 24px;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="logo-section">
+            <h1>TCP<span>specter</span></h1>
+            <p>Network Security Analytics &mdash; DLP + NDR + NTA + Explanation Engine</p>
+        </div>
+        <div style="display:flex; gap:16px; align-items:center;">
+            <button id="security_toggle_btn"
+                onclick="toggleSecurity()"
+                style="background: rgba(52,211,153,0.15); color: #34d399; border: 1px solid #34d399;
+                       padding: 6px 16px; border-radius: 8px; cursor: pointer; font-family: inherit;
+                       font-size: 13px; font-weight: 600; letter-spacing: 0.05em;"
+            >
+                &#9679; ANALÍTICA ACTIVA
+            </button>
+            <div class="status-badge">
+                <span class="status-dot"></span>
+                Monitoreo en Vivo
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Grid Dashboard -->
+    <div class="dashboard-grid">
+        <!-- Security Widget Card -->
+        <div class="card grid-span-2">
+            <div class="card-title">Análisis de Seguridad de Red (C2 / Máquina Zombie)</div>
+            <div class="security-score-container">
+                <div class="score-circle" id="risk_gradient">
+                    <div class="score-circle-inner">
+                        <span class="score-num" id="risk_score">0</span>
+                        <span class="score-lbl">Riesgo</span>
+                    </div>
+                </div>
+                <div class="security-details">
+                    <div>
+                        <span class="text-muted" style="font-size: 13px;">Nivel de Amenaza:</span>
+                        <span class="severity-badge" id="risk_level">CALCULANDO...</span>
+                    </div>
+                    <div class="detail-item">Alertas Activas: <span class="detail-value text-main" id="findings_count">0</span></div>
+                    <div class="formula-card">
+                        <strong>Fórmula Heurística de Riesgo:</strong><br>
+                        • Crítico (+40): Reverse Shell, C2, binario borrado<br>
+                        • Alto (+25): Ejecución en /tmp, SUID con red<br>
+                        • Medio (+10): Puerto abierto no confiable<br>
+                        • Riesgo Máximo acotado a 100.
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- System Stats Pie Chart -->
+        <div class="card">
+            <div class="card-title">Distribución de Protocolos</div>
+            <div class="chart-container">
+                <canvas id="protoChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Top CPU Processes Chart -->
+        <div class="card">
+            <div class="card-title">Top Procesos CPU (%)</div>
+            <div class="chart-container">
+                <canvas id="procChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bandwidth History Chart & Security Alerts List -->
+    <div class="dashboard-grid" style="grid-template-columns: 2fr 1fr; margin-bottom: 24px;">
+        <div class="card">
+            <div class="card-title">Tráfico de Red Histórico (Mbps)</div>
+            <div class="chart-container-large">
+                <canvas id="bandwidthChart"></canvas>
+            </div>
+        </div>
+        <div class="card" style="display: flex; flex-direction: column;">
+            <div class="card-title">Alertas C2 / Comportamientos Zombie</div>
+            <div style="flex: 1; overflow-y: auto; max-height: 220px;" id="alerts_list">
+                <div style="color: var(--text-muted); font-style: italic; text-align: center; margin-top: 40px;">No se han detectado alertas de seguridad activas.</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Cyber-Node Global Map Section -->
+    <div class="card" style="margin-bottom: 24px;">
+        <div class="connections-header" style="margin-bottom: 0;">
+            <div class="connections-title">
+                <h2>Mapa Global de Conexiones</h2>
+                <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Análisis de Nodos de Tráfico en Tiempo Real</p>
+            </div>
+        </div>
+        <div id="globeChart" style="width: 100%; height: 500px;"></div>
+    </div>
+
+    <!-- Active Connections Table Section -->
+    <div class="card">
+        <div class="connections-header">
+            <div class="connections-title">
+                <h2>Conexiones del Sistema Activas</h2>
+                <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Selecciona cualquier fila para traducir e interpretar lo que está pasando en la red.</p>
+            </div>
+            <div class="search-box">
+                <input type="text" class="search-input" id="search_bar" placeholder="Buscar (proceso, PID, IP, puerto, estado)..." oninput="filterTable()">
+            </div>
+        </div>
+
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Proceso</th>
+                        <th>PID</th>
+                        <th>Proto</th>
+                        <th>IP Origen</th>
+                        <th>Pto Orig.</th>
+                        <th>IP Destino</th>
+                        <th>Pto Dest.</th>
+                        <th>Estado</th>
+                        <th>Evaluación</th>
+                    </tr>
+                </thead>
+                <tbody id="connections_tbody">
+                    <tr>
+                        <td colspan="9" style="text-align: center; color: var(--text-muted); padding: 40px 0;">Cargando conexiones del sistema...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Interpretation Dialog Modal -->
+    <div class="modal" id="interpret_modal">
+        <div class="modal-content">
+            <span class="close-btn" onclick="closeModal()">&times;</span>
+            <div class="modal-header">
+                <h3 id="modal_proc_title">Interpretación de Conexión</h3>
+                <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;" id="modal_socket_title">PID: - | TCP | -</p>
+            </div>
+            <div class="modal-body">
+                <div class="interpret-banner" id="modal_banner">
+                    Evaluación de Riesgo: -
+                </div>
+                <div class="info-block" id="modal_ip_block">
+                    <h4>Ámbito de la IP Destino</h4>
+                    <p>-</p>
+                </div>
+                <div class="info-block" id="modal_port_block">
+                    <h4>Propósito del Puerto</h4>
+                    <p>-</p>
+                </div>
+                <div class="info-block" id="modal_status_block">
+                    <h4>Estado de la Conexión</h4>
+                    <p>-</p>
+                </div>
+                <div class="info-block block-danger" id="modal_danger_block">
+                    <h4>Análisis de Seguridad Detallado</h4>
+                    <p>-</p>
+                </div>
+                <div class="info-block" id="modal_recommendation_block">
+                    <h4>Recomendaciones</h4>
+                    <p>-</p>
+                </div>
+                <div class="info-block" id="modal_educational_block">
+                    <h4>Contexto Educativo</h4>
+                    <p>-</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let protoChart = null;
+        let procChart = null;
+        let bandwidthChart = null;
+        let globeChart = null;
+        let bandwidthData = { rx: [], tx: [], labels: [] };
+        let allConnections = [];
+        let geoIpCache = {}; // ip -> geo data or 'fetching' or 'local'
+        let tracerouteCache = {}; // ip -> array of IPs or 'fetching'
+        let localGeo = null; // Store real origin
+
+        async function initGlobe() {
+            try {
+                // Fetch self-geo first
+                const selfRes = await fetch('/api/self_geo');
+                localGeo = await selfRes.json();
+                if(!localGeo || localGeo.error) {
+                    localGeo = {lon: 0, lat: 0, city: 'Unknown', country: 'Local'};
+                }
+
+                const res = await fetch('https://cdn.jsdelivr.net/npm/echarts@4.9.0/map/json/world.json');
+                const worldJson = await res.json();
+                echarts.registerMap('world', worldJson);
+                
+                const chartDom = document.getElementById('globeChart');
+                globeChart = echarts.init(chartDom);
+                
+                const option = {
+                    backgroundColor: 'transparent',
+                    geo: {
+                        map: 'world',
+                        roam: true,
+                        zoom: 1.2,
+                        itemStyle: {
+                            areaColor: 'rgba(17, 24, 39, 0.8)',
+                            borderColor: '#4a7a9d',
+                            borderWidth: 1
+                        },
+                        emphasis: {
+                            itemStyle: { areaColor: 'rgba(74, 122, 157, 0.4)' },
+                            label: { show: false }
+                        }
+                    },
+                    tooltip: {
+                        trigger: 'item',
+                        backgroundColor: 'rgba(0,0,0,0.8)',
+                        textStyle: { color: '#fff' },
+                        formatter: function (params) {
+                            if(params.seriesType === 'effectScatter') {
+                                return `<strong>${params.data.name}</strong><br/>IP: ${params.data.ip}`;
+                            }
+                            return '';
+                        }
+                    },
+                    series: [
+                        {
+                            type: 'lines',
+                            zlevel: 1,
+                            polyline: true, // IMPORTANT for drawing multiple hops
+                            effect: {
+                                show: true,
+                                period: 4,
+                                trailLength: 0.6,
+                                symbolSize: 3
+                            },
+                            lineStyle: {
+                                width: 0,
+                                curveness: 0.2, // Still looks good with polylines
+                                opacity: 0.5
+                            },
+                            data: []
+                        },
+                        {
+                            type: 'effectScatter',
+                            coordinateSystem: 'geo',
+                            zlevel: 2,
+                            rippleEffect: { brushType: 'stroke', scale: 4 },
+                            symbolSize: 6,
+                            itemStyle: { color: '#34d399' },
+                            data: []
+                        }
+                    ]
+                };
+                globeChart.setOption(option);
+            } catch (err) {
+                console.error("Error cargando el mapa:", err);
+            }
+        }
+
+        function initCharts() {
+            // Protocol Chart
+            const ctxProto = document.getElementById('protoChart').getContext('2d');
+            protoChart = new Chart(ctxProto, {
+                type: 'doughnut',
+                data: {
+                    labels: ['TCP', 'UDP', 'LISTEN'],
+                    datasets: [{
+                        data: [0, 0, 0],
+                        backgroundColor: ['#4a7a9d', '#f2e8c9', '#888888'],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'right', labels: { color: '#9ca3af', font: { size: 11 } } }
+                    }
+                }
+            });
+
+            // Processes Chart
+            const ctxProc = document.getElementById('procChart').getContext('2d');
+            procChart = new Chart(ctxProc, {
+                type: 'pie',
+                data: {
+                    labels: ['Ninguno'],
+                    datasets: [{
+                        data: [1],
+                        backgroundColor: ['#4a7a9d', '#f2e8c9', '#888888', '#555555'],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'right', labels: { color: '#9ca3af', font: { size: 10 } } }
+                    }
+                }
+            });
+
+            // Bandwidth Chart
+            const ctxBand = document.getElementById('bandwidthChart').getContext('2d');
+            bandwidthChart = new Chart(ctxBand, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [
+                        {
+                            label: 'Bajada (RX)',
+                            data: [],
+                            borderColor: '#34d399',
+                            backgroundColor: 'rgba(52, 211, 153, 0.05)',
+                            fill: true,
+                            tension: 0.4,
+                            borderWidth: 2
+                        },
+                        {
+                            label: 'Subida (TX)',
+                            data: [],
+                            borderColor: '#4a7a9d',
+                            backgroundColor: 'rgba(74, 122, 157, 0.05)',
+                            fill: true,
+                            tension: 0.4,
+                            borderWidth: 2
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: { grid: { color: 'rgba(255,255,255,0.03)' }, ticks: { color: '#888888' } },
+                        y: { grid: { color: 'rgba(255,255,255,0.03)' }, ticks: { color: '#888888' } }
+                    },
+                    plugins: {
+                        legend: { labels: { color: '#9ca3af' } }
+                    }
+                }
+            });
+        }
+
+        async function refreshData() {
+            try {
+                const response = await fetch('/api/data');
+                const data = await response.json();
+
+                // 1. Update Security Panel
+                document.getElementById('risk_score').innerText = data.security.score;
+                const circle = document.getElementById('risk_gradient');
+                
+                // Color mapping
+                let riskColor = '#34d399';
+                let riskClass = 'sev-bajo';
+                if (data.security.score >= 60) {
+                    riskColor = '#f87171';
+                    riskClass = 'sev-critico';
+                } else if (data.security.score >= 35) {
+                    riskColor = '#fbbf24';
+                    riskClass = 'sev-alto';
+                } else if (data.security.score >= 15) {
+                    riskColor = '#4a7a9d';
+                    riskClass = 'sev-medio';
+                }
+                circle.style.background = `conic-gradient(${riskColor} ${data.security.score}%, #1e293b 0%)`;
+                
+                const riskLevelEl = document.getElementById('risk_level');
+                riskLevelEl.innerText = data.security.risk_level;
+                riskLevelEl.className = `severity-badge ${riskClass}`;
+
+                document.getElementById('findings_count').innerText = data.security.findings.length;
+
+                // 2. Update Alerts list
+                const alertsList = document.getElementById('alerts_list');
+                if (data.security.findings.length === 0) {
+                    alertsList.innerHTML = `<div style="color: var(--text-muted); font-style: italic; text-align: center; margin-top: 40px;">No se han detectado alertas de seguridad activas.</div>`;
+                } else {
+                    alertsList.innerHTML = data.security.findings.map(f => {
+                        let fclass = 'sev-bajo';
+                        if (f.severity === 'CRITICAL') fclass = 'sev-critico';
+                        else if (f.severity === 'HIGH') fclass = 'sev-alto';
+                        else if (f.severity === 'MEDIUM') fclass = 'sev-medio';
+                        
+                        const pidText = f.pid ? `PID ${f.pid}` : '';
+                        const nameText = f.proc_name ? `(${f.proc_name})` : '';
+
+                        return `
+                            <div style="background: rgba(255,255,255,0.02); margin-bottom: 8px; padding: 10px; border-radius: 8px; border-left: 3px solid ${riskColor};">
+                                <div style="display:flex; justify-content:space-between; margin-bottom: 4px;">
+                                    <span class="severity-badge ${fclass}" style="padding:1px 6px; font-size:10px;">${f.severity}</span>
+                                    <span style="font-size:11px; color:var(--text-muted);">${pidText} ${nameText}</span>
+                                </div>
+                                <div style="font-size:13px; color:var(--text-main);">${f.description}</div>
+                            </div>
+                        `;
+                    }).join('');
+                }
+
+                // 3. Update Charts
+                // Protocol Pie Chart
+                let tc = 0, uc = 0, lc = 0;
+                data.connections.forEach(c => {
+                    if (c.status === 'LISTEN') lc++;
+                    else if (c.proto === 'TCP') tc++;
+                    else if (c.proto === 'UDP') uc++;
+                });
+                protoChart.data.datasets[0].data = [tc, uc, lc];
+                protoChart.update();
+
+                // Process Pie Chart
+                let procCpuMap = {};
+                data.processes.forEach(p => {
+                    if (p.cpu > 0) {
+                        procCpuMap[p.name] = (procCpuMap[p.name] || 0) + p.cpu;
+                    }
+                });
+                const procLabels = Object.keys(procCpuMap);
+                const procValues = Object.values(procCpuMap);
+                if (procLabels.length > 0) {
+                    procChart.data.labels = procLabels;
+                    procChart.data.datasets[0].data = procValues;
+                } else {
+                    procChart.data.labels = ['Sin actividad'];
+                    procChart.data.datasets[0].data = [1];
+                }
+                procChart.update();
+
+                // Bandwidth History Chart
+                const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                bandwidthData.labels.push(timeStr);
+                bandwidthData.rx.push(data.rx_speed);
+                bandwidthData.tx.push(data.tx_speed);
+
+                if (bandwidthData.labels.length > 15) {
+                    bandwidthData.labels.shift();
+                    bandwidthData.rx.shift();
+                    bandwidthData.tx.shift();
+                }
+
+                bandwidthChart.data.labels = bandwidthData.labels;
+                bandwidthChart.data.datasets[0].data = bandwidthData.rx;
+                bandwidthChart.data.datasets[1].data = bandwidthData.tx;
+                bandwidthChart.update();
+
+                // 4. Update Connections Table
+                allConnections = data.connections;
+                filterTable();
+
+                // 5. Update Map Data (Traceroutes and Hops)
+                const uniqueRemoteIPs = [...new Set(data.connections.map(c => c.raddr_ip).filter(ip => ip && ip !== '-' && ip !== '0.0.0.0' && ip !== '127.0.0.1'))];
+                const fetchPromises = [];
+                
+                uniqueRemoteIPs.forEach(ip => {
+                    // Fetch traceroute hops
+                    if (!tracerouteCache[ip]) {
+                        tracerouteCache[ip] = 'fetching';
+                        fetchPromises.push(
+                            fetch(`/api/traceroute?ip=${ip}`).then(r => r.json()).then(hops => {
+                                tracerouteCache[ip] = hops || [];
+                                // Kick off geoip fetch for all new hops
+                                (hops || []).forEach(hop_ip => {
+                                    if(!geoIpCache[hop_ip]) {
+                                        geoIpCache[hop_ip] = 'fetching';
+                                        fetchPromises.push(
+                                            fetch(`/api/geoip?ip=${hop_ip}`).then(r => r.json()).then(geo => {
+                                                geoIpCache[hop_ip] = (geo && !geo.is_local) ? geo : 'local';
+                                            }).catch(()=> geoIpCache[hop_ip] = 'local')
+                                        );
+                                    }
+                                });
+                            }).catch(() => {
+                                tracerouteCache[ip] = [ip]; // fallback to direct
+                            })
+                        );
+                    }
+                    
+                    // Also make sure dest IP geo is fetching
+                    if (!geoIpCache[ip]) {
+                        geoIpCache[ip] = 'fetching';
+                        fetchPromises.push(
+                            fetch(`/api/geoip?ip=${ip}`).then(r => r.json()).then(geo => {
+                                geoIpCache[ip] = (geo && !geo.is_local) ? geo : 'local';
+                            }).catch(() => {
+                                geoIpCache[ip] = 'local';
+                            })
+                        );
+                    }
+                });
+
+                if (fetchPromises.length > 0) {
+                    await Promise.all(fetchPromises);
+                }
+
+                if (globeChart && localGeo) {
+                    const linesData = [];
+                    const scatterData = [];
+                    
+                    // Center local node
+                    scatterData.push({ name: `${localGeo.city}, ${localGeo.country}`, ip: localGeo.ip || '127.0.0.1', value: [localGeo.lon, localGeo.lat], itemStyle: { color: '#4a7a9d' } });
+
+                    data.connections.forEach(c => {
+                        const destIp = c.raddr_ip;
+                        if(destIp === '-' || destIp === '0.0.0.0' || destIp === '127.0.0.1') return;
+                        
+                        const destGeo = geoIpCache[destIp];
+                        if (destGeo && destGeo !== 'local' && destGeo !== 'fetching') {
+                            let color = '#34d399'; // Normal
+                            if (c.interpretation && c.interpretation.assessment.includes('CRÍTICO')) {
+                                color = '#f87171'; // Danger
+                            } else if (c.interpretation && c.interpretation.assessment.includes('REVISAR')) {
+                                color = '#fbbf24'; // Warning
+                            }
+                            
+                            // Add destination node
+                            scatterData.push({
+                                name: `${destGeo.city}, ${destGeo.country}`,
+                                ip: destIp,
+                                value: [destGeo.lon, destGeo.lat],
+                                itemStyle: { color: color }
+                            });
+                            
+                            // Build polyline coordinates
+                            const hops = tracerouteCache[destIp];
+                            let coords = [[localGeo.lon, localGeo.lat]];
+                            
+                            if (Array.isArray(hops)) {
+                                hops.forEach(hop_ip => {
+                                    const hGeo = geoIpCache[hop_ip];
+                                    if (hGeo && hGeo !== 'local' && hGeo !== 'fetching') {
+                                        coords.push([hGeo.lon, hGeo.lat]);
+                                        // Also add hop point to scatter so it glows too, but smaller
+                                        if (hop_ip !== destIp) {
+                                            scatterData.push({
+                                                name: `${hGeo.city}, ${hGeo.country} (Hop)`,
+                                                ip: hop_ip,
+                                                value: [hGeo.lon, hGeo.lat],
+                                                symbolSize: 3,
+                                                itemStyle: { color: '#4a7a9d' }
+                                            });
+                                        }
+                                    }
+                                });
+                            }
+                            
+                            // Ensure destination is the last point if not already
+                            const lastCoord = coords[coords.length - 1];
+                            if (!lastCoord || lastCoord[0] !== destGeo.lon || lastCoord[1] !== destGeo.lat) {
+                                coords.push([destGeo.lon, destGeo.lat]);
+                            }
+
+                            linesData.push({
+                                coords: coords,
+                                lineStyle: { color: color }
+                            });
+                        }
+                    });
+
+                    // Remove duplicates in scatterData by coordinates to avoid double rendering
+                    const uniqueScatter = [];
+                    const seenCoords = new Set();
+                    scatterData.forEach(pt => {
+                        const key = `${pt.value[0]},${pt.value[1]}`;
+                        if(!seenCoords.has(key)) {
+                            seenCoords.add(key);
+                            uniqueScatter.push(pt);
+                        }
+                    });
+
+                    globeChart.setOption({
+                        series: [
+                            { data: linesData },
+                            { data: uniqueScatter }
+                        ]
+                    });
+                }
+
+            } catch (err) {
+                console.error("Error al refrescar información del backend:", err);
+            }
+        }
+
+        function filterTable() {
+            const query = document.getElementById('search_bar').value.toLowerCase().trim();
+            const tbody = document.getElementById('connections_tbody');
+            
+            const filtered = allConnections.filter(c => {
+                if (!query) return true;
+                return (
+                    (c.name || '').toLowerCase().includes(query) ||
+                    String(c.pid || '').includes(query) ||
+                    (c.proto || '').toLowerCase().includes(query) ||
+                    (c.laddr_ip || '').toLowerCase().includes(query) ||
+                    String(c.laddr_port || '').includes(query) ||
+                    (c.raddr_ip || '').toLowerCase().includes(query) ||
+                    String(c.raddr_port || '').includes(query) ||
+                    (c.status || '').toLowerCase().includes(query)
+                );
+            });
+
+            if (filtered.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: var(--text-muted); padding: 40px 0;">No se encontraron conexiones que coincidan.</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = filtered.map((c, idx) => {
+                let statusBadge = 'badge-other';
+                if (c.status === 'ESTABLISHED') statusBadge = 'badge-established';
+                else if (c.status === 'LISTEN') statusBadge = 'badge-listen';
+
+                let evalClass = 'sev-bajo';
+                if (c.interpretation.assessment.includes('CRÍTICO')) evalClass = 'sev-critico';
+                else if (c.interpretation.assessment.includes('REVISAR')) evalClass = 'sev-alto';
+
+                const nameText = c.name || '-';
+                const pidText = c.pid || '-';
+
+                return `
+                    <tr onclick="openModal(${idx})">
+                        <td><strong>${nameText}</strong></td>
+                        <td>${pidText}</td>
+                        <td>${c.proto}</td>
+                        <td>${c.laddr_ip}</td>
+                        <td>${c.laddr_port}</td>
+                        <td>${c.raddr_ip}</td>
+                        <td>${c.raddr_port}</td>
+                        <td><span class="badge-status ${statusBadge}">${c.status}</span></td>
+                        <td><span class="severity-badge ${evalClass}" style="padding: 2px 6px; font-size: 11px;">${c.interpretation.assessment}</span></td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function openModal(idx) {
+            const conn = allConnections[idx];
+            if (!conn) return;
+
+            document.getElementById('modal_proc_title').innerText = `Interpretación de '${conn.name}'`;
+            document.getElementById('modal_socket_title').innerText = `PID: ${conn.pid} | Protocolo: ${conn.proto} | IP Destino: ${conn.raddr_ip}:${conn.raddr_port}`;
+            
+            const banner = document.getElementById('modal_banner');
+            banner.innerText = `Evaluación: ${conn.interpretation.assessment}`;
+            
+            let bannerBg = 'rgba(52, 211, 153, 0.15)';
+            let bannerColor = 'var(--success)';
+            if (conn.interpretation.assessment.includes('CRÍTICO')) {
+                bannerBg = 'rgba(248, 113, 113, 0.15)';
+                bannerColor = 'var(--danger)';
+            } else if (conn.interpretation.assessment.includes('REVISAR')) {
+                bannerBg = 'rgba(251, 191, 36, 0.15)';
+                bannerColor = 'var(--warning)';
+            }
+            banner.style.background = bannerBg;
+            banner.style.color = bannerColor;
+
+            document.getElementById('modal_ip_block').querySelector('p').innerText = conn.interpretation.ip_desc;
+            document.getElementById('modal_port_block').querySelector('p').innerText = conn.interpretation.port_desc;
+            document.getElementById('modal_status_block').querySelector('p').innerText = conn.interpretation.status_desc;
+            document.getElementById('modal_danger_block').querySelector('p').innerText = conn.interpretation.explanation;
+            
+            const recs = conn.interpretation.recommendations || [];
+            document.getElementById('modal_recommendation_block').querySelector('p').innerText = recs.length > 0 ? "• " + recs.join("\n• ") : "No hay recomendaciones específicas.";
+            
+            document.getElementById('modal_educational_block').querySelector('p').innerText = conn.interpretation.educational || "-";
+
+            document.getElementById('interpret_modal').classList.add('active');
+        }
+
+        function closeModal() {
+            document.getElementById('interpret_modal').classList.remove('active');
+        }
+
+        async function toggleSecurity() {
+            const res = await fetch('/api/toggle_security', {method: 'POST'});
+            const data = await res.json();
+            const btn = document.getElementById('security_toggle_btn');
+            if (data.enabled) {
+                btn.style.background = 'rgba(52,211,153,0.15)';
+                btn.style.color = '#34d399';
+                btn.style.border = '1px solid #34d399';
+                btn.innerHTML = '&#9679; ANALÍTICA ACTIVA';
+            } else {
+                btn.style.background = 'rgba(136,136,136,0.1)';
+                btn.style.color = '#888888';
+                btn.style.border = '1px solid #444444';
+                btn.innerHTML = '&#9675; ANALÍTICA DESACTIVADA';
+            }
+        }
+
+        window.onload = () => {
+            initCharts();
+            initGlobe();
+            refreshData();
+            setInterval(refreshData, 1500);
+        };
+    </script>
+</body>
+</html>

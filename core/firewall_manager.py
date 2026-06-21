@@ -166,6 +166,63 @@ def get_active_rules() -> list[dict]:
     return get_blocked_ips()
 
 
+def add_custom_rule(action: str, src_ip: str, dst_ip: str, port: int, protocol: str) -> bool:
+    """
+    Creates a granular firewall rule mapping inputs safely to iptables.
+    """
+    action = str(action).upper()
+    protocol = str(protocol).lower()
+    
+    if action not in ("ACCEPT", "DROP", "REJECT", "ALLOW", "DENY"):
+        return False
+    
+    # Map ALLOW/DENY to iptables equivalent ACCEPT/DROP
+    if action == "ALLOW": action = "ACCEPT"
+    if action == "DENY": action = "DROP"
+        
+    if protocol not in ("tcp", "udp", "all", "icmp"):
+        return False
+        
+    safe_src = validate_ip(src_ip) if src_ip and src_ip.strip() else None
+    safe_dst = validate_ip(dst_ip) if dst_ip and dst_ip.strip() else None
+    
+    port_num = None
+    if port:
+        try:
+            port_num = int(port)
+            if not (1 <= port_num <= 65535):
+                port_num = None
+        except (ValueError, TypeError):
+            pass
+
+    backend = detect_backend()
+    if backend != "iptables":
+        # Can be adapted for UFW if needed
+        return False
+
+    cmd = ["iptables", "-A", "INPUT"]
+    
+    if protocol != "all":
+        cmd.extend(["-p", protocol])
+        
+    if safe_src:
+        cmd.extend(["-s", safe_src])
+        
+    if safe_dst:
+        cmd.extend(["-d", safe_dst])
+        
+    if port_num is not None and protocol in ("tcp", "udp"):
+        cmd.extend(["--dport", str(port_num)])
+        
+    cmd.extend(["-j", action])
+
+    try:
+        subprocess.run(cmd, check=True, timeout=5.0, capture_output=True)
+        return True
+    except Exception:
+        return False
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Advanced Enterprise SOAR Containment & Deception (Tarpitting)
 # ─────────────────────────────────────────────────────────────────────────────

@@ -691,31 +691,17 @@ HTML_CONTENT = """<!DOCTYPE html>
 </head>
 <body>
     <header>
-        <div class="logo-section">
+        <div class="logo-section" style="cursor:pointer" onclick="window.location.href='/'">
             <h1>TCP<span>specter</span></h1>
             <p data-i18n="subtitle">Network Security Analytics &mdash; DLP + NDR + NTA + Explanation Engine</p>
         </div>
         <div style="display:flex; gap:16px; align-items:center;">
-            <div class="lang-selector" style="display:flex; gap:6px; margin-right:8px;">
-                <button class="lang-btn" data-lang="es" onclick="changeLanguage('es')" style="background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); color: var(--text-muted); padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; cursor: pointer;">ES</button>
-                <button class="lang-btn" data-lang="en" onclick="changeLanguage('en')" style="background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); color: var(--text-muted); padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; cursor: pointer;">EN</button>
-            </div>
-            <a href="/tutorial" 
-               style="background: rgba(74, 122, 157, 0.15); color: var(--text-main); border: 1px solid var(--primary);
-                      padding: 6px 16px; border-radius: 8px; cursor: pointer; text-decoration: none;
-                      font-size: 13px; font-weight: 600;"
-               data-i18n="nav_tutorial"
-            >
-                📖 Tutorial
-            </a>
-            <a href="/logs" 
-               style="background: rgba(248, 113, 113, 0.15); color: #f87171; border: 1px solid #f87171;
-                      padding: 6px 16px; border-radius: 8px; cursor: pointer; text-decoration: none;
-                      font-size: 13px; font-weight: 600;"
-               data-i18n="nav_logs"
-            >
-                📄 Logs de Seguridad
-            </a>
+            <nav style="display:flex; gap:12px; margin-right: 16px; align-items: center;">
+                <a href="/" style="color: var(--text-main); text-decoration: none; font-size: 14px; font-weight: 600;" data-i18n="nav_dashboard">Dashboard</a>
+                <a href="/firewall" style="color: var(--text-main); text-decoration: none; font-size: 14px; font-weight: 600;" data-i18n="nav_firewall">Firewall & IDS</a>
+                <a href="/logs" style="color: var(--text-main); text-decoration: none; font-size: 14px; font-weight: 600;" data-i18n="nav_logs">Logs</a>
+                <a href="/configuration" style="color: var(--text-main); text-decoration: none; font-size: 14px; font-weight: 600;" data-i18n="nav_config">Configuración</a>
+            </nav>
             <button id="security_toggle_btn"
                 onclick="toggleSecurity()"
                 style="background: rgba(52,211,153,0.15); color: #34d399; border: 1px solid #34d399;
@@ -732,9 +718,10 @@ HTML_CONTENT = """<!DOCTYPE html>
         </div>
     </header>
 
-    <!-- Main Grid Dashboard -->
-    <div class="dashboard-grid">
-        <!-- Security Widget Card -->
+    <!-- SPA Wrappers -->
+    <!-- View: Dashboard -->
+    <div id="view_dashboard" class="spa-view">
+        <div class="dashboard-grid">
         <div class="card grid-span-2" onclick="showModuleHelp('security', event)">
             <div class="card-title" data-i18n="sec_analysis">Análisis de Seguridad de Red (C2 / Máquina Zombie)</div>
             <div class="security-score-container">
@@ -800,72 +787,118 @@ HTML_CONTENT = """<!DOCTYPE html>
         </div>
     </div>
 
-    <!-- Firewall & Snort Control Panel -->
-    <div class="dashboard-grid" style="grid-template-columns: 1fr 1fr; margin-bottom: 24px;">
-        <div class="card" onclick="showModuleHelp('ids_fw', event)">
-            <div class="card-title">
-                <span>IDS Snort & Firewall</span>
-                <span id="snort_badge" class="severity-badge sev-bajo">Cargando...</span>
+    <!-- DNS Tunneling & Heurísticas de Tráfico -->
+    <div class="card" style="display: flex; flex-direction: column; margin-bottom: 24px;" onclick="showModuleHelp('dlp_ndr', event)">
+        <div class="card-title">DNS Tunneling & Heurísticas de Tráfico</div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 12px;">
+            <div style="background: rgba(255,255,255,0.01); border: 1px solid var(--card-border); border-radius: 10px; padding: 10px; text-align: center;">
+                <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">Paquetes Sniffeados</div>
+                <div id="scapy_packet_count" style="font-size: 20px; font-weight: 700; color: var(--primary); margin-top: 4px;">0</div>
             </div>
-            <div style="display: flex; flex-direction: column; gap: 14px;">
-                <div style="display: flex; gap: 12px; align-items: center; justify-content: space-between;">
-                    <div>
-                        <strong style="font-size: 15px;">Servicio Snort (IDS):</strong>
-                        <div id="snort_info" style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Detectando estado...</div>
-                    </div>
-                    <div style="display: flex; gap: 8px;">
-                        <button id="install_snort_btn" onclick="installSnort()" style="display: none; background: rgba(74, 122, 157, 0.15); border: 1px solid var(--primary); color: var(--text-main); padding: 6px 12px; border-radius: 8px; font-size: 12px; cursor: pointer; font-weight: 600;">Instalar Snort</button>
-                        <button id="toggle_snort_btn" onclick="toggleSnort()" style="background: rgba(255,255,255,0.05); border: 1px solid var(--card-border); color: var(--text-main); padding: 6px 12px; border-radius: 8px; font-size: 12px; cursor: pointer; font-weight: 600;">Iniciar/Detener</button>
-                    </div>
-                </div>
-                <hr style="border: 0; border-top: 1px solid var(--card-border);">
-                <div>
-                    <strong style="font-size: 14px; display: block; margin-bottom: 8px;">Reglas Cortafuegos Activas:</strong>
-                    <div class="table-container" style="max-height: 140px;">
-                        <table style="font-size: 12px;">
-                            <thead>
-                                <tr style="background: #0d131f;">
-                                    <th style="padding: 8px 10px;">IP Bloqueada</th>
-                                    <th style="padding: 8px 10px;">Backend</th>
-                                    <th style="padding: 8px 10px;">Target</th>
-                                    <th style="padding: 8px 10px;">Acción</th>
-                                </tr>
-                            </thead>
-                            <tbody id="firewall_tbody">
-                                <tr>
-                                    <td colspan="4" style="text-align: center; color: var(--text-muted); padding: 10px 0;">Cargando reglas...</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-                <div style="display: flex; gap: 8px; margin-top: 4px;">
-                    <input type="text" id="block_ip_input" placeholder="IP a bloquear" style="flex: 1; background: rgba(17, 24, 39, 0.8); border: 1px solid var(--card-border); border-radius: 8px; padding: 6px 12px; color: var(--text-main); outline: none; font-size: 12px;">
-                    <button onclick="blockIP()" style="background: rgba(248, 113, 113, 0.15); border: 1px solid var(--danger); color: var(--danger); padding: 6px 12px; border-radius: 8px; font-size: 12px; cursor: pointer; font-weight: 600;">Bloquear IP</button>
-                </div>
+            <div style="background: rgba(255,255,255,0.01); border: 1px solid var(--card-border); border-radius: 10px; padding: 10px; text-align: center;">
+                <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">Entropía de Payload</div>
+                <div id="scapy_avg_entropy" style="font-size: 20px; font-weight: 700; color: var(--accent); margin-top: 4px;">0.00</div>
             </div>
         </div>
-        
-        <div class="card" style="display: flex; flex-direction: column;" onclick="showModuleHelp('dlp_ndr', event)">
-            <div class="card-title">DNS Tunneling & Heurísticas de Tráfico</div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 12px;">
-                <div style="background: rgba(255,255,255,0.01); border: 1px solid var(--card-border); border-radius: 10px; padding: 10px; text-align: center;">
-                    <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">Paquetes Sniffeados</div>
-                    <div id="scapy_packet_count" style="font-size: 20px; font-weight: 700; color: var(--primary); margin-top: 4px;">0</div>
-                </div>
-                <div style="background: rgba(255,255,255,0.01); border: 1px solid var(--card-border); border-radius: 10px; padding: 10px; text-align: center;">
-                    <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">Entropía de Payload</div>
-                    <div id="scapy_avg_entropy" style="font-size: 20px; font-weight: 700; color: var(--accent); margin-top: 4px;">0.00</div>
-                </div>
-            </div>
-            <div style="flex: 1; overflow-y: auto; max-height: 180px;">
-                <strong style="font-size: 13px; color: var(--text-muted); display: block; margin-bottom: 8px; text-transform: uppercase;">Alertas de Tráfico / DNS / DLP:</strong>
-                <div id="dns_dlp_alerts" style="display: flex; flex-direction: column; gap: 8px;">
-                    <div style="color: var(--text-muted); font-style: italic; text-align: center; margin-top: 20px; font-size: 12px;">No hay alertas en tiempo real de Scapy/DNS.</div>
-                </div>
+        <div style="flex: 1; overflow-y: auto; max-height: 180px;">
+            <strong style="font-size: 13px; color: var(--text-muted); display: block; margin-bottom: 8px; text-transform: uppercase;">Alertas de Tráfico / DNS / DLP:</strong>
+            <div id="dns_dlp_alerts" style="display: flex; flex-direction: column; gap: 8px;">
+                <div style="color: var(--text-muted); font-style: italic; text-align: center; margin-top: 20px; font-size: 12px;">No hay alertas en tiempo real de Scapy/DNS.</div>
             </div>
         </div>
     </div>
+
+    </div> <!-- End Dashboard Grid -->
+
+    <!-- View: Firewall -->
+    <div id="view_firewall" class="spa-view" style="display:none;">
+        <!-- Firewall & Snort Enterprise Panel -->
+        <div class="card" style="margin-bottom: 24px;" onclick="showModuleHelp('ids_fw', event)">
+        <div class="connections-header" style="margin-bottom: 16px; border-bottom: 1px solid var(--card-border); padding-bottom: 12px;">
+            <div class="connections-title">
+                <h2 style="font-size: 18px; color: var(--text-main); margin: 0;">Network Security Policies (Firewall & IDS)</h2>
+                <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Configuración avanzada de interfaces, IPS y filtrado de red</p>
+            </div>
+            <div style="display: flex; gap: 12px; align-items: center;">
+                <div style="display: flex; flex-direction: column; align-items: flex-end; margin-right: 12px;">
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                        <strong style="font-size: 12px; color: var(--text-muted);">Servicio Snort:</strong>
+                        <span id="snort_badge" class="severity-badge sev-bajo" style="font-size: 10px;">Cargando...</span>
+                    </div>
+                    <div id="snort_info" style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Detectando estado...</div>
+                </div>
+                <button id="install_snort_btn" onclick="installSnort()" style="display: none; background: rgba(74, 122, 157, 0.15); border: 1px solid var(--primary); color: var(--text-main); padding: 8px 16px; border-radius: 6px; font-size: 12px; cursor: pointer; font-weight: 600; transition: all 0.2s;">Instalar Snort</button>
+                <button id="toggle_snort_btn" onclick="toggleSnort()" style="background: rgba(255,255,255,0.05); border: 1px solid var(--card-border); color: var(--text-main); padding: 8px 16px; border-radius: 6px; font-size: 12px; cursor: pointer; font-weight: 600; transition: all 0.2s;">Iniciar/Detener</button>
+            </div>
+        </div>
+
+        <!-- Enterprise Rule Builder -->
+        <div style="background: rgba(13, 19, 31, 0.4); border: 1px solid var(--card-border); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <strong style="font-size: 14px; color: var(--primary);">+ Nueva Regla de Cortafuegos (Rule Builder)</strong>
+                <div style="display: flex; gap: 8px;">
+                    <input type="text" id="block_ip_input" placeholder="Quick Block: IP a bloquear" style="width: 220px; background: rgba(17, 24, 39, 0.8); border: 1px solid var(--card-border); border-radius: 6px; padding: 6px 12px; color: var(--text-main); outline: none; font-size: 12px;">
+                    <button onclick="blockIP()" style="background: rgba(248, 113, 113, 0.15); border: 1px solid var(--danger); color: var(--danger); padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-weight: 600;">Drop (Quick)</button>
+                </div>
+            </div>
+            
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; align-items: end;">
+                <div>
+                    <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 6px; font-weight: 600;">Acción *</label>
+                    <select id="rb_action" style="width: 100%; background: rgba(17, 24, 39, 0.8); border: 1px solid var(--card-border); border-radius: 6px; padding: 8px; color: var(--text-main); font-size: 12px; outline: none; cursor: pointer;">
+                        <option value="DENY">Bloquear (DENY)</option>
+                        <option value="ALLOW">Permitir (ALLOW)</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 6px; font-weight: 600;">Protocolo</label>
+                    <select id="rb_protocol" style="width: 100%; background: rgba(17, 24, 39, 0.8); border: 1px solid var(--card-border); border-radius: 6px; padding: 8px; color: var(--text-main); font-size: 12px; outline: none; cursor: pointer;">
+                        <option value="all">ALL</option>
+                        <option value="tcp">TCP</option>
+                        <option value="udp">UDP</option>
+                        <option value="icmp">ICMP</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 6px; font-weight: 600;">IP Origen</label>
+                    <input type="text" id="rb_src_ip" placeholder="Cualquiera" style="width: 100%; background: rgba(17, 24, 39, 0.8); border: 1px solid var(--card-border); border-radius: 6px; padding: 8px; color: var(--text-main); font-size: 12px; outline: none;">
+                </div>
+                <div>
+                    <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 6px; font-weight: 600;">IP Destino</label>
+                    <input type="text" id="rb_dst_ip" placeholder="Cualquiera" style="width: 100%; background: rgba(17, 24, 39, 0.8); border: 1px solid var(--card-border); border-radius: 6px; padding: 8px; color: var(--text-main); font-size: 12px; outline: none;">
+                </div>
+                <div>
+                    <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 6px; font-weight: 600;">Puerto</label>
+                    <input type="number" id="rb_port" placeholder="Todos" style="width: 100%; background: rgba(17, 24, 39, 0.8); border: 1px solid var(--card-border); border-radius: 6px; padding: 8px; color: var(--text-main); font-size: 12px; outline: none;">
+                </div>
+                <div>
+                    <button onclick="addCustomRule()" style="width: 100%; background: rgba(74, 122, 157, 0.2); border: 1px solid var(--primary); color: var(--text-main); padding: 9px; border-radius: 6px; font-size: 12px; cursor: pointer; font-weight: 600; transition: background 0.2s;">Aplicar Regla</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Active Rules Table -->
+        <div style="margin-top: 16px;">
+            <strong style="font-size: 14px; display: block; margin-bottom: 12px; color: var(--text-main);">Reglas Cortafuegos Activas:</strong>
+            <div class="table-container" style="max-height: 250px; border: 1px solid var(--card-border); border-radius: 8px; overflow: hidden;">
+                <table style="font-size: 12px; width: 100%; border-collapse: collapse;">
+                    <thead>
+                        <tr style="background: rgba(17, 24, 39, 0.9); border-bottom: 1px solid var(--card-border);">
+                            <th style="padding: 12px; text-align: left; color: var(--text-muted); font-weight: 600;">Regla / IP Afectada</th>
+                            <th style="padding: 12px; text-align: left; color: var(--text-muted); font-weight: 600;">Gestor (Backend)</th>
+                            <th style="padding: 12px; text-align: left; color: var(--text-muted); font-weight: 600;">Política (Target)</th>
+                            <th style="padding: 12px; text-align: left; color: var(--text-muted); font-weight: 600; width: 100px;">Acción</th>
+                        </tr>
+                    </thead>
+                    <tbody id="firewall_tbody">
+                        <tr>
+                            <td colspan="4" style="text-align: center; color: var(--text-muted); padding: 20px 0;">Cargando reglas...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div> <!-- End View: Firewall -->
 
     <!-- Cyber-Node Global Map Section -->
     <div class="card" style="margin-bottom: 24px;" onclick="showModuleHelp('map', event)">
@@ -913,6 +946,29 @@ HTML_CONTENT = """<!DOCTYPE html>
             </table>
         </div>
     </div>
+    </div> <!-- End View: Dashboard (Contains Map and Connections) -->
+
+    <!-- View: Configuration -->
+    <div id="view_configuration" class="spa-view" style="display:none;">
+        <div class="card" style="margin-bottom: 24px;">
+            <h2 data-i18n="config_title" style="margin-bottom: 16px;">Configuración del Sistema</h2>
+            
+            <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--card-border); padding: 16px; border-radius: 12px; margin-bottom: 16px;">
+                <h3 data-i18n="config_lang">Idioma / Language</h3>
+                <p data-i18n="config_lang_desc" style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">Selecciona el idioma de la interfaz gráfica.</p>
+                <div style="display: flex; gap: 12px;">
+                    <button onclick="changeLanguage('es')" style="background: rgba(74, 122, 157, 0.15); border: 1px solid var(--primary); color: var(--text-main); padding: 8px 24px; border-radius: 8px; cursor: pointer; font-weight: 600;">Español</button>
+                    <button onclick="changeLanguage('en')" style="background: rgba(255,255,255,0.05); border: 1px solid var(--card-border); color: var(--text-main); padding: 8px 24px; border-radius: 8px; cursor: pointer; font-weight: 600;">English</button>
+                </div>
+            </div>
+
+            <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--card-border); padding: 16px; border-radius: 12px;">
+                <h3 data-i18n="config_tutorial">Tutoriales y Documentación</h3>
+                <p data-i18n="config_tutorial_desc" style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">Aprende cómo usar TCPspecter y explorar sus capacidades.</p>
+                <a href="/tutorial" style="display: inline-block; background: rgba(52, 211, 153, 0.15); border: 1px solid var(--success); color: var(--success); padding: 8px 24px; border-radius: 8px; cursor: pointer; font-weight: 600; text-decoration: none;" data-i18n="nav_tutorial">Ver Tutorial Interactivo</a>
+            </div>
+        </div>
+    </div> <!-- End View: Configuration -->
 
     <!-- Interpretation Dialog Modal -->
     <div class="modal" id="interpret_modal">
@@ -987,7 +1043,7 @@ HTML_CONTENT = """<!DOCTYPE html>
                     backgroundColor: 'transparent',
                     geo: {
                         map: 'world',
-                        roam: true,
+                        roam: false,
                         zoom: 1.2,
                         itemStyle: {
                             areaColor: 'rgba(17, 24, 39, 0.8)',
@@ -1312,16 +1368,18 @@ HTML_CONTENT = """<!DOCTYPE html>
                 // Firewall blocked rules table update
                 const fwTbody = document.getElementById('firewall_tbody');
                 if (data.firewall.blocked_ips.length === 0) {
-                    fwTbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--text-muted); padding: 10px 0;">Ninguna IP bloqueada actualmente.</td></tr>`;
+                    fwTbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--text-muted); padding: 20px 0; border-bottom: 1px solid var(--card-border);">Ninguna política activa encontrada.</td></tr>`;
                 } else {
                     fwTbody.innerHTML = data.firewall.blocked_ips.map(rule => {
                         return `
-                            <tr>
-                                <td style="padding: 6px 10px; font-weight: 600; color: var(--danger);">${rule.ip}</td>
-                                <td style="padding: 6px 10px;">${rule.backend}</td>
-                                <td style="padding: 6px 10px;">${rule.target}</td>
-                                <td style="padding: 6px 10px;">
-                                    <button onclick="unblockIP('${rule.ip}')" style="background: rgba(52, 211, 153, 0.1); border: 1px solid var(--success); color: var(--success); padding: 2px 6px; border-radius: 4px; font-size: 10px; cursor: pointer;">Desbloquear</button>
+                            <tr style="border-bottom: 1px solid rgba(255,255,255,0.05); transition: background 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.02)'" onmouseout="this.style.background='transparent'">
+                                <td style="padding: 12px; font-weight: 600; color: var(--danger);">${rule.ip}</td>
+                                <td style="padding: 12px; color: var(--text-main);">${rule.backend}</td>
+                                <td style="padding: 12px; color: var(--text-main);">
+                                    <span style="background: rgba(248, 113, 113, 0.1); color: var(--danger); padding: 2px 6px; border-radius: 4px; font-size: 10px;">${rule.target}</span>
+                                </td>
+                                <td style="padding: 12px;">
+                                    <button onclick="unblockIP('${rule.ip}')" style="background: rgba(52, 211, 153, 0.1); border: 1px solid var(--success); color: var(--success); padding: 4px 8px; border-radius: 4px; font-size: 11px; cursor: pointer; transition: all 0.2s;">Desbloquear</button>
                                 </td>
                             </tr>
                         `;
@@ -1689,6 +1747,37 @@ HTML_CONTENT = """<!DOCTYPE html>
             }
         }
 
+        async function addCustomRule() {
+            const action = document.getElementById('rb_action').value;
+            const protocol = document.getElementById('rb_protocol').value;
+            const src_ip = document.getElementById('rb_src_ip').value.trim();
+            const dst_ip = document.getElementById('rb_dst_ip').value.trim();
+            const port = document.getElementById('rb_port').value.trim();
+            
+            if (!confirm(`¿Aplicar nueva regla de firewall?\\nAcción: ${action}\\nProtocolo: ${protocol}\\nOrigen: ${src_ip || 'Cualquiera'}\\nDestino: ${dst_ip || 'Cualquiera'}\\nPuerto: ${port || 'Todos'}`)) return;
+            
+            try {
+                const res = await fetch('/api/firewall/rules', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window.csrfToken || '' },
+                    body: JSON.stringify({ action, protocol, src_ip, dst_ip, port })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    document.getElementById('rb_src_ip').value = '';
+                    document.getElementById('rb_dst_ip').value = '';
+                    document.getElementById('rb_port').value = '';
+                    alert('Regla de firewall aplicada correctamente.');
+                } else {
+                    alert('Error: ' + (data.error || 'Operación fallida. ¿Tienes permisos sudo?'));
+                }
+            } catch(e) {
+                alert('Error: ' + e);
+            } finally {
+                refreshData();
+            }
+        }
+
         const translations = {
             es: {
                 subtitle: "Network Security Analytics — DLP + NDR + NTA + Engine de Explicación",
@@ -1707,12 +1796,20 @@ HTML_CONTENT = """<!DOCTYPE html>
                 chart_bandwidth: "Tráfico de Red Histórico (Mbps)",
                 sec_alerts_active: "Alertas C2 / Comportamientos Zombie",
                 no_alerts: "No se han detectado alertas de seguridad activas.",
-                no_conns: "No se encontraron conexiones que coincidan."
+                no_conns: "No se encontraron conexiones que coincidan.",
+                nav_dashboard: "Dashboard",
+                nav_firewall: "Cortafuegos e IDS",
+                nav_logs: "📄 Logs de Seguridad",
+                nav_config: "Configuración",
+                config_title: "Configuración del Sistema",
+                config_lang: "Idioma / Language",
+                config_lang_desc: "Selecciona el idioma de la interfaz gráfica.",
+                config_tutorial: "Tutoriales y Documentación",
+                config_tutorial_desc: "Aprende cómo usar TCPspecter y explorar sus capacidades."
             },
             en: {
                 subtitle: "Network Security Analytics — DLP + NDR + NTA + Explanation Engine",
                 nav_tutorial: "📖 Tutorial",
-                nav_logs: "📄 Security Logs",
                 btn_sec_active: "● SECURITY ANALYTICS ACTIVE",
                 btn_sec_inactive: "○ SECURITY ANALYTICS INACTIVE",
                 status_live: "Live Monitoring",
@@ -1726,7 +1823,16 @@ HTML_CONTENT = """<!DOCTYPE html>
                 chart_bandwidth: "Historical Network Traffic (Mbps)",
                 sec_alerts_active: "C2 Alerts / Botnet Behaviors",
                 no_alerts: "No active security alerts detected.",
-                no_conns: "No matching connections found."
+                no_conns: "No matching connections found.",
+                nav_dashboard: "Dashboard",
+                nav_firewall: "Firewall & IDS",
+                nav_logs: "📄 Security Logs",
+                nav_config: "Settings",
+                config_title: "System Configuration",
+                config_lang: "Language / Idioma",
+                config_lang_desc: "Select the graphical interface language.",
+                config_tutorial: "Tutorials & Documentation",
+                config_tutorial_desc: "Learn how to use TCPspecter and explore its capabilities."
             }
         };
 
@@ -1878,11 +1984,36 @@ HTML_CONTENT = """<!DOCTYPE html>
             document.getElementById('help_modal').style.display = 'none';
         }
 
+        function handleRouting() {
+            const path = window.location.pathname;
+            document.querySelectorAll('.spa-view').forEach(v => v.style.display = 'none');
+            
+            // Adjust header nav active states
+            document.querySelectorAll('nav a').forEach(a => {
+                a.style.color = 'var(--text-main)';
+                if (a.getAttribute('href') === path) {
+                    a.style.color = 'var(--primary)';
+                }
+            });
+
+            if (path === '/firewall') {
+                document.getElementById('view_firewall').style.display = 'block';
+            } else if (path === '/configuration') {
+                document.getElementById('view_configuration').style.display = 'block';
+            } else {
+                // Default to dashboard
+                document.getElementById('view_dashboard').style.display = 'block';
+                // Trigger resize for Echarts to render correctly if it was hidden
+                if (globeChart) globeChart.resize();
+            }
+        }
+
         window.onload = () => {
             initCharts();
             initGlobe();
             refreshData();
             applyLanguage();
+            handleRouting(); // Render the correct SPA view based on URL
             setInterval(refreshData, 1500);
         };
     </script>
@@ -2631,11 +2762,10 @@ def start_web_server(port=None):
 
         def do_GET(self):
             url = urllib.parse.urlparse(self.path)
-            if url.path == '/':
+            if url.path in ('/', '/firewall', '/configuration'):
                 csrf_token = generate_csrf_token()
                 self.send_response(200)
                 self.send_header('Content-type', 'text/html; charset=utf-8')
-                # Embed CSRF token as a cookie (HttpOnly=False so JS can read it for AJAX headers)
                 self.send_header('Set-Cookie', f'csrf_token={csrf_token}; Path=/; SameSite=Strict')
                 self._send_security_headers()
                 self.end_headers()
@@ -2821,6 +2951,26 @@ def start_web_server(port=None):
                     "ip": safe_ip or ip,
                     "error": None if success else "Invalid IP or firewall operation failed"
                 }).encode('utf-8'))
+
+            elif url.path == '/api/firewall/rules':
+                action = body.get("action", "")
+                src_ip = body.get("src_ip", "")
+                dst_ip = body.get("dst_ip", "")
+                port = body.get("port", "")
+                protocol = body.get("protocol", "")
+                
+                from core.firewall_manager import add_custom_rule
+                success = add_custom_rule(action, src_ip, dst_ip, port, protocol)
+                
+                self.send_response(200 if success else 400)
+                self.send_header('Content-type', 'application/json')
+                self._send_security_headers()
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "success": success,
+                    "error": None if success else "Failed to add firewall rule. Check inputs or permissions."
+                }).encode('utf-8'))
+
 
             elif url.path == '/api/toggle_snort':
                 from core.snort_manager import is_snort_running, start_snort, stop_snort

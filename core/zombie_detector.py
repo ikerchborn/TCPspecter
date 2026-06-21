@@ -212,6 +212,30 @@ def is_private_ip(ip: str) -> bool:
     return False
 
 
+def scan_anonymous_memory(pid: int) -> int:
+    """
+    Escanea /proc/{pid}/maps buscando regiones de memoria que estén marcadas como ejecutables
+    (r-xp o rwxp) pero que no estén respaldadas por un archivo en disco (memoria anónima).
+    """
+    anon_exec_regions = 0
+    maps_path = f"/proc/{pid}/maps"
+    if os.path.exists(maps_path):
+        try:
+            with open(maps_path, "r", errors="replace") as maps_f:
+                for line in maps_f:
+                    parts = line.strip().split(None, 5)
+                    if len(parts) >= 5:
+                        perms = parts[1]
+                        if 'x' in perms and 'r' in perms:
+                            path = parts[5].strip() if len(parts) >= 6 else ""
+                            # Path vacío o explícitamente [anon]
+                            if not path or "[anon]" in path:
+                                anon_exec_regions += 1
+        except Exception:
+            pass
+    return anon_exec_regions
+
+
 def _enrich_finding(finding: dict) -> dict:
     """
     Enriches a raw finding dict with MITRE ATT&CK tagging and compliance mapping.
@@ -359,42 +383,36 @@ def analyze_zombie_status(force=False) -> dict:
             try:
                 JIT_RUNTIMES = {"python", "python3", "node", "java", "firefox", "chrome", "chromium", "brave", "code", "electron", "slack", "teams", "discord"}
                 if proc_name.lower() not in JIT_RUNTIMES:
-                    maps_path = f"/proc/{pid}/maps"
-                    if os.path.exists(maps_path):
-                        with open(maps_path, "r", errors="replace") as maps_f:
-                            anon_exec_regions = 0
-                            for line in maps_f:
-                                parts = line.strip().split(None, 5)
-                                if len(parts) >= 5:
-                                    perms = parts[1]
-                                    if 'x' in perms:
-                                        path = parts[5].strip() if len(parts) >= 6 else ""
-                                        # Focus on anonymous mappings (empty path)
-                                        if not path or path == "":
-                                            anon_exec_regions += 1
-                            
-                            # Real fileless malware has active connections or runs from temp directories
-                            is_suspicious_process = False
-                            if conns:
+                    anon_exec_regions = scan_anonymous_memory(pid)
+                    
+                    if anon_exec_regions > 0:
+                        # Real fileless malware has active connections or runs from temp directories
+                        is_suspicious_process = False
+                        
+                        # Has active external connections
+                        if conns:
+                            has_external_conn = any(not is_private_ip(conn.raddr.ip) for conn in conns if conn.status == "ESTABLISHED" and conn.raddr)
+                            if has_external_conn:
                                 is_suspicious_process = True
-                            if exe_path:
-                                for spath in SUSPICIOUS_PATHS:
-                                    if exe_path.startswith(spath):
-                                        is_suspicious_process = True
-                            
-                            # Command shells should never run JIT code
-                            SHELL_NAMES = {"bash", "sh", "zsh", "dash", "ash"}
-                            if proc_name.lower() in SHELL_NAMES:
-                                is_suspicious_process = True
+                                
+                        if exe_path:
+                            for spath in SUSPICIOUS_PATHS:
+                                if exe_path.startswith(spath):
+                                    is_suspicious_process = True
+                        
+                        # Command shells should never run JIT code
+                        SHELL_NAMES = {"bash", "sh", "zsh", "dash", "ash"}
+                        if proc_name.lower() in SHELL_NAMES:
+                            is_suspicious_process = True
 
-                            if anon_exec_regions > 0 and is_suspicious_process:
-                                findings.append(_enrich_finding({
-                                    "category": "Memoria Fileless",
-                                    "severity": "CRITICAL",
-                                    "description": f"Se detectaron {anon_exec_regions} regiones de memoria ejecutable anónima (sin respaldo en disco). Posible inyección de shellcode / malware fileless.",
-                                    "pid": pid,
-                                    "proc_name": proc_name
-                                }))
+                        if is_suspicious_process:
+                            findings.append(_enrich_finding({
+                                "category": "Memoria Fileless",
+                                "severity": "HIGH",
+                                "description": f"Se detectaron {anon_exec_regions} regiones de memoria ejecutable anónima (sin respaldo en disco). Posible inyección de shellcode / malware fileless con red activa.",
+                                "pid": pid,
+                                "proc_name": proc_name
+                            }))
             except Exception:
                 pass
 

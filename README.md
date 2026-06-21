@@ -1,120 +1,218 @@
 # TCPspecter
 
-**TCPspecter** es una plataforma de Network Traffic Analysis (NTA), NDR (Network Detection and Response) y análisis forense de procesos en tiempo real escrita en Python 3.11+ para sistemas GNU/Linux (como Debian, Ubuntu o Parrot Security OS). Inspirada en el clásico **TCPView de Sysinternals para Windows**, ofrece visualización interactiva de sockets y PIDs, auditoría de reputación VirusTotal, detección de malware fileless y capacidades de mitigación/respuesta activa integradas directamente desde la consola o su interfaz web.
+**TCPspecter** is an enterprise-grade Network Traffic Analysis (NTA), Network Detection & Response (NDR), and real-time process forensics platform written in Python 3.11+ for GNU/Linux systems (Debian, Ubuntu, Kali, Parrot Security OS, CentOS and derivatives). Inspired by Sysinternals' TCPView for Windows, it combines deep packet inspection, memory forensics, and an active SOAR response engine — all accessible from both an interactive terminal (TUI) and a full-featured web dashboard.
 
 ---
 
-## 📸 Capturas de Pantalla (Screenshots)
+## 📸 Screenshots
 
-### 💻 Interfaz de Terminal (TUI)
-Nuestra interfaz TUI ASCII premium con gráficos de rendimiento local, distribución de sockets y análisis zombie heurístico en tiempo real:
-![TCPspecter TUI Interface](media/media__1782004737440.png)
+### 💻 Terminal Interface (TUI)
+Premium ASCII TUI with real-time performance graphs, socket distribution analysis, and heuristic zombie scanning:
 
-### 🌐 Dashboard Web Gráfico (Glassmorphic)
-El panel gráfico interactivo de control accesible en tu navegador local (`http://localhost:8050` o el puerto configurado en `config.json`):
-![TCPspecter Web Dashboard](media/media__1782005073785.png)
+![TCPspecter TUI Interface](media/tui.png)
 
-### 🗺️ Mapa Geográfico & Traceroute (Web)
-Visualización geográfica dinámica de tus conexiones IP activas y saltos de red intermediate en un mapa real de Apache ECharts:
-![TCPspecter Web Cyber Map](media/media__1782000944472.png)
+### 🌐 Web Dashboard (Glassmorphic Dark)
+Interactive web control panel accessible in your local browser at `http://localhost:8050`:
+
+![TCPspecter Web Dashboard](media/web_dashboard_1.png)
+
+### 🗺️ Geographic Map & Traceroute
+Dynamic geographic visualization of active IP connections and network hops rendered with Apache ECharts:
+
+![TCPspecter Cyber Map](media/web_dashboard_2.png)
 
 ---
 
-## Arquitectura y Visión del Proyecto: Plataforma NTA / NDR / NDR de Grado Empresarial
+## Architecture: Decoupled Alert Bus
 
-El objetivo principal de **TCPspecter** no es ser simplemente otro sniffer de red pasivo. El proyecto implementa una arquitectura desacoplada a través de un **Alert Bus asíncrono** y modular que separa los motores de detección del frontend y de la persistencia de datos.
-
-### Motores de Seguridad y Flujo de Datos
+TCPspecter is not a passive sniffer. At its core is an **asynchronous, decoupled Alert Bus** that separates detection engines from UI and persistence layers — a design pattern inspired by production-grade SIEM architectures.
 
 ```text
-  [Snort IDS] ────┐
-  [Scapy NTA] ────┼──→ alerts.publish() ──→ [ Alert Bus (Queue) ] ──→ [ Web Server / TUI ]
-  [Proc Maps] ────┘                                |
-                                                   └──→ Webhooks Firmados (SOAR)
-                                                   └──→ Persistencia ECS JSON
+  [Snort IDS]  ──┐
+  [Scapy DPI]  ──┼──→ alerts.publish() ──→ [ Alert Bus (Queue) ] ──→ [ Web Dashboard / TUI ]
+  [Proc Maps]  ──┘                                  │
+                                                    ├──→ ECS JSON → security_alerts.json
+                                                    ├──→ Text Log → security_events.log
+                                                    └──→ HMAC-Signed Webhooks (SOAR)
 ```
 
-1. **Separación de Privilegios y Desacoplamiento (SOLID)**: Los sniffers y analizadores (`traffic_analyzer`, `snort_manager`, `zombie_detector`) operan sin conocer al servidor web o la interfaz de usuario. Publican alertas de forma no bloqueante a una cola en [`core/alerts.py`](file:///home/kingsman/.gemini/antigravity/scratch/tcpspecter/core/alerts.py) para que un hilo dedicado las procese y persista en disco.
-2. **Elastic Common Schema (ECS v1.12)**: Todas las alertas se serializan en formato estandarizado JSON ECS, listas para su ingesta inmediata en SIEMs como Splunk, Elasticsearch o Wazuh.
-3. **Mapeo de Cumplimiento Normativo Integrado**: Cada alerta incluye etiquetas asociadas a controles de **NIST CSF** (ej. `PR.DS-5`, `DE.CM-7`) y de **ISO/IEC 27001** (ej. `A.12.6.1`, `A.13.1.1`), facilitando auditorías de cumplimiento continuas.
+**Key Architectural Properties:**
+1. **No circular imports** — Detection engines (`zombie_detector`, `scapy_engine`, `snort_manager`) only call `alerts.publish()`. They have zero knowledge of the web server or TUI.
+2. **ECS v1.12 compliance** — Every `SecurityAlert` is serialized to Elastic Common Schema JSON, making logs immediately ingestible by Wazuh, Splunk, or ELK without custom parsers.
+3. **Compliance tagging** — Each alert carries embedded NIST CSF (e.g., `DE.CM-7`, `PR.DS-5`) and ISO/IEC 27001 control tags (e.g., `A.12.6.1`, `A.13.1.1`) for continuous compliance auditing.
 
 ---
 
-## Características Principales y Novedades del Sistema
+## Core Features
 
-*   **Detección de Malware Fileless (Memory Scanner)**: Escanea dinámicamente `/proc/[pid]/maps` buscando segmentos de memoria marcados como ejecutables (`x`) pero sin respaldo físico en disco (memoria anónima). Detecta shellcodes y payloads inyectados en memoria (MITRE ATT&CK `T1055` - Process Injection).
-*   **Respuesta Activa y Cuarentena Host (SOAR)**: Permite aislar completamente el endpoint bajo sospecha vía `quarantine_host()`. Genera cadenas aisladas de `iptables` (`TCPSPECTER-Q-IN` y `TCPSPECTER-Q-OUT`) que bloquean todo el tráfico entrante/saliente excepto el loopback y las IPs de los analistas de incidentes configuradas.
-*   **Tecnología de Engaño (Deception & Tarpitting)**: En lugar de simplemente descartar paquetes de IPs atacantes, TCPspecter puede redirigir los intentos de conexión de un atacante usando `PREROUTING DNAT` a un servidor Tarpit integrado ([`core/tarpit.py`](file:///home/kingsman/.gemini/antigravity/scratch/tcpspecter/core/tarpit.py)). El Tarpit responde a una velocidad extremadamente lenta (1 byte cada 15 segundos), agotando y bloqueando los escáneres automáticos.
-*   **Webhooks Criptográficos**: Envía automáticamente payloads firmados mediante `HMAC-SHA256` a plataformas externas de orquestación de respuesta (SOAR). La firma va incluida en la cabecera `X-TCPspecter-Signature` usando el secreto definido en `config.json`.
-*   **Análisis de Beaconing C2**: Identifica patrones regulares de comunicación C2 (Command and Control) analizando el coeficiente de variación de los intervalos de conexiones salientes por PID.
-*   **Seguridad Web Endurecida**: Implementa protección contra ataques de inyección de comandos en las llamadas del firewall mediante sanitización estricta de IPs con el módulo `ipaddress`, tokens CSRF de un solo uso por cliente con TTL de 30 minutos, limitación de tasa (Rate Limiting de 30 peticiones/min) y cabeceras de seguridad estrictas (CSP, X-Frame-Options, HSTS).
+### 🔍 Detection Engines
+
+| Feature | Description | MITRE ATT&CK |
+|---------|-------------|--------------|
+| **Fileless Memory Scanner** | Scans `/proc/<pid>/maps` for anonymous executable segments missing a file backing — detects shellcode injection and process hollowing | T1055 |
+| **C2 Beaconing Detector** | Analyzes the coefficient of variation of per-PID outbound connection intervals to flag statistically regular C2 heartbeats | T1071.001 |
+| **DNS Tunneling Heuristics** | Deep packet inspection of DNS queries measuring Shannon entropy and abnormal query lengths using Scapy | T1048.003 |
+| **Zombie Process Detector** | Identifies processes executing from suspicious paths (`/tmp`, `/dev/shm`), deleted binaries, or SUID binaries with active network sockets | T1059, T1070.004 |
+| **Process Masquerading** | Detects processes mimicking legitimate system service names while running from non-standard paths | T1036.005 |
+| **Mass Connection Scan** | Flags processes opening abnormal numbers of concurrent outbound connections (with a whitelist for browsers, dev tools) | T1046 |
+
+### 🛡️ Response Engine (SOAR)
+
+| Feature | Description |
+|---------|-------------|
+| **Quick Block / Rule Builder** | Web UI and TUI-based IP blocking via `iptables` or `ufw` (auto-detected) with strict IPv4 input sanitization |
+| **Host Quarantine** | Full host isolation using custom `iptables` chains (`TCPSPECTER-Q-IN` / `TCPSPECTER-Q-OUT`) preserving only loopback and analyst IP access |
+| **Deception Tarpitting** | PREROUTING DNAT to redirect attacking IPs to a slow-response Tarpit server (`core/tarpit.py`) that responds at 1 byte/15s to exhaust scanners |
+| **HMAC-Signed Webhooks** | Signed HTTP POST payloads (HMAC-SHA256 via `X-TCPspecter-Signature` header) to external SOAR platforms |
+
+### 🔐 Web Security
+- Single-use CSRF tokens (30-minute TTL, per-client)
+- Rate limiting: 30 mutating requests/minute/IP
+- Strict HTTP security headers (CSP, X-Frame-Options, HSTS)
+- All firewall IPs validated with Python `ipaddress` module before any syscall
 
 ---
 
-## Instalación y Uso Rápido
+## Quick Start
 
-### Requisitos Previos
-*   Python 3.11+
-*   Soporte de terminal mínimo de 80x24 caracteres
-*   Paquete `python3-venv` instalado en el sistema
-*   Privilegios de superusuario (`sudo`) para interactuar con `iptables`, `snort` y los sockets de otros usuarios.
+### Prerequisites
+- Python 3.11+
+- Linux system (any modern distro)
+- Terminal with minimum 80×24 characters
+- `python3-venv` package installed
+- **Root privileges** (`sudo`) — required for raw sockets, `/proc` access, and `iptables`
+
+### Installation & Run
 
 ```bash
-# Clonar y entrar al repositorio
+# Clone the repository
+git clone https://github.com/your-org/tcpspecter.git
 cd tcpspecter
 
-# Dar permisos y ejecutar
+# Make the launcher executable
 chmod +x run.sh
+
+# Run (will prompt to elevate to root if needed)
 ./run.sh
 ```
 
-El script `run.sh` se encarga de crear el entorno virtual, instalar las dependencias necesarias (`requirements.txt`) y ejecutar la aplicación elevando privilegios si así lo confirmas.
+`run.sh` automatically creates a Python virtual environment, installs all dependencies from `requirements.txt`, and launches the application.
+
+### Web Dashboard
+Once running, open your browser to:
+```
+http://localhost:8050
+```
 
 ---
 
-## 🌐 Servidor y Dashboard Web Gráfico
+## Configuration (`config.json`)
 
-TCPspecter incluye un servidor web integrado que levanta automáticamente un dashboard gráfico en tiempo real al iniciar la aplicación.
+Edit the `config.json` file in the project root to customize behavior:
 
-*   **Dirección de Acceso**: Abre tu navegador e ingresa a:
-    `http://localhost:8050` (o `http://127.0.0.1:8050`)
-*   **Puerto por Defecto**: **`8050`**.
-*   **Personalización de Puerto**: Si deseas cambiar el puerto de escucha o configurar webhooks, edita el archivo `config.json`:
-    ```json
-    {
-      "virustotal_api_key": "TU_API_KEY_AQUI",
-      "web_server_port": 8050,
-      "webhook_url": "http://tu-plataforma-soar/endpoint",
-      "webhook_secret": "clave_hmac_secreta"
-    }
-    ```
+```json
+{
+  "virustotal_api_key": "",
+  "ACTIVE_RESPONSE_ENABLED": false,
+  "MANAGEMENT_IP_WHITELIST": ["127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"],
+  "SOAR_WEBHOOK_URL": "",
+  "TARPIT_PORT": 2222,
+  "web_server_port": 8050,
+  "webhook_url": "",
+  "webhook_secret": ""
+}
+```
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `ACTIVE_RESPONSE_ENABLED` | bool | `false` | Master switch for automated blocking. `false` = audit mode only |
+| `MANAGEMENT_IP_WHITELIST` | list | RFC 1918 ranges | IPs never blocked by automated response |
+| `webhook_url` | string | `""` | HTTP POST endpoint for HMAC-signed alert forwarding |
+| `webhook_secret` | string | `""` | Shared secret for `X-TCPspecter-Signature` HMAC-SHA256 signing |
+| `virustotal_api_key` | string | `""` | API key for VirusTotal binary reputation lookups (TUI `v` key) |
+| `TARPIT_PORT` | int | `2222` | Local port used by the Tarpit deception server |
+| `web_server_port` | int | `8050` | Web dashboard listening port |
+
+> ⚠️ **`ACTIVE_RESPONSE_ENABLED = false` by default.** Never enable automated blocking before profiling your network baseline. Start in audit mode.
 
 ---
 
-## Mapeo Completo de Teclas (Keybindings en TUI)
+## TUI Keyboard Reference
 
-| Tecla | Acción | Descripción |
-| :--- | :--- | :--- |
-| `↑` / `k` | Cursor Arriba | Desplazar selección en la tabla activa |
-| `↓` / `j` | Cursor Abajo | Desplazar selección en la tabla activa |
-| `TAB` | Cambiar Foco | Alterna el foco entre los paneles del sistema |
-| `a` | Analizar (Local) | Análisis offline del binario seleccionado (SUID, hashes, permisos) |
-| `v` | Analizar (VirusTotal) | Consulta de reputación online en la API de VirusTotal |
-| `x` | Terminar Proceso | Kill PID seleccionado con confirmación segura |
-| `d` | Resolver DNS | Activa/Desactiva la resolución DNS inversa en segundo plano |
-| `/` | Filtrar | Barra de búsqueda en tiempo real (IP, puerto, PID, proceso) |
-| `p` | Filtro Protocolo | Filtra los sockets en la tabla: `ALL` → `TCP` → `UDP` → `LISTEN` |
-| `s` | Ordenar Columna | Cambia la columna de ordenación de los procesos activos |
-| `e` | Exportar Reporte | Genera reportes del sistema en formatos CSV o JSON |
-| `z` | Analizar Zombie | Auditoría heurística detallada de amenazas C2 y Zombie en el sistema |
-| `c` | Ver todas / Filtrar | Alterna entre ver todas las conexiones del sistema o solo del proceso |
-| `m` | Mapa Global (Browser)| Abre el mapa geográfico en el navegador web local |
-| `g` | Gráficos (TUI) | Modal de gráficos locales integrados en la terminal |
-| `Shift+g` | Gráficos (Browser) | Abre el navegador web al Dashboard Gráfico |
-| `i` | Interpretar | Abre el panel del Explanation Engine para traducir el socket a lenguaje humano |
-| `S` | On/Off Analítica | Activa o desactiva las heurísticas de seguridad avanzadas en tiempo real |
-| `f` | Cortafuegos | Abre el panel de control del Cortafuegos (Firewall) con el estado de reglas |
-| `t` | On/Off Snort | Inicia o detiene el servicio pasivo de detección de intrusos Snort |
-| `b` | Bloquear IP | Bloquea la IP externa de la conexión seleccionada en el cortafuegos |
-| `ESC` | Cancelar / Cerrar | Cierra diálogos, modales o barra de búsqueda activa |
-| `q` | Salir | Cierra la aplicación y detiene todos sus subprocesos de forma segura |
+| Key | Action | Description |
+|:----|:-------|:------------|
+| `↑` / `k` | Cursor Up | Move selection up in active table |
+| `↓` / `j` | Cursor Down | Move selection down in active table |
+| `TAB` | Switch Focus | Toggle focus between interface panels |
+| `a` | Analyze (Local) | Offline binary analysis: SUID bits, hashes, permissions |
+| `v` | VirusTotal | Live reputation lookup via VirusTotal API |
+| `x` | Kill Process | Terminate selected PID (with confirmation prompt) |
+| `d` | Resolve DNS | Toggle background reverse DNS resolution |
+| `/` | Filter | Real-time search bar (IP, port, PID, process name) |
+| `p` | Protocol Filter | Cycle: `ALL` → `TCP` → `UDP` → `LISTEN` |
+| `s` | Sort Column | Change sort column for the active connections table |
+| `e` | Export Report | Generate CSV or JSON system report |
+| `z` | Zombie Scan | Run full heuristic audit (C2, Zombie, fileless) |
+| `c` | View Toggle | All connections ↔ process-specific connections |
+| `m` | Global Map | Open geographic connections map in browser |
+| `g` | Charts (TUI) | Open embedded local charts modal in terminal |
+| `Shift+G` | Charts (Browser) | Open web dashboard in browser |
+| `i` | Interpret | Open Explanation Engine for human-language socket translation |
+| `S` | Toggle Analytics | Enable/disable advanced security heuristics live |
+| `f` | Firewall Panel | Open firewall control panel and active rule overview |
+| `t` | Toggle Snort | Start/stop passive Snort IDS service |
+| `b` | Block IP | Block the selected connection's external IP in iptables/ufw |
+| `ESC` | Cancel/Close | Close dialogs, modals, or active search bar |
+| `q` | Quit | Gracefully shut down all processes and release sockets |
+
+---
+
+## Web Dashboard Navigation
+
+Access the SPA at `http://localhost:8050` — multiple views available via the top navigation bar:
+
+| Route | Description |
+|-------|-------------|
+| `/` | Main Dashboard: Risk score, protocol charts, alerts, active connections, geo map |
+| `/firewall` | Firewall & IDS: Rule Builder, active iptables/ufw policies, Snort status |
+| `/logs` | Security Log Viewer: Parsed `security_events.log` timeline |
+| `/configuration` | Settings: Language toggle (EN/ES), tutorial link |
+
+---
+
+## Documentation
+
+Full documentation is in the [`docs/`](docs/) directory, organized as follows:
+
+```
+docs/
+├── 1_getting_started/
+│   ├── architecture.md          # Alert Bus design, engine descriptions
+│   ├── installation.md          # Full installation guide
+│   └── configuration.md         # config.json reference
+├── 2_user_manual/
+│   ├── tui_navigation.md        # Complete TUI keyboard map and panel guide
+│   └── web_dashboard.md         # Web SPA views, XAI modal, Rule Builder
+├── 3_incident_response_playbooks/
+│   ├── playbook_dns_tunneling.md    # IR: DNS Tunneling / Data Exfiltration
+│   ├── playbook_c2_beaconing.md     # IR: Command & Control Beaconing
+│   └── playbook_fileless_malware.md # IR: Fileless Memory Injection
+├── 4_active_response_soar/
+│   ├── automated_mitigation.md  # Quarantine chains, Tarpit, SOAR flow
+│   └── custom_webhooks.md       # HMAC webhook integration
+└── 5_compliance_and_rules/
+    ├── ecs_mapping.md           # ECS v1.12 field mapping table
+    └── mitre_attack.md          # MITRE ATT&CK coverage matrix
+```
+
+---
+
+## Security & Legal Notice
+
+TCPspecter is designed exclusively as a **defensive Blue Team tool**. It requires root access and should only be deployed on systems you own or have explicit authorization to monitor. Unauthorized interception of network traffic may be illegal in your jurisdiction.
+
+---
+
+## License
+
+MIT License — see [LICENSE](LICENSE) for details.

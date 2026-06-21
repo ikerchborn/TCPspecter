@@ -57,6 +57,7 @@ class SecurityAlert:
     mitre_tactic: str | None = None
     nist_controls: tuple[str, ...] = ()
     iso_controls: tuple[str, ...] = ()
+    compliance_tags: tuple[str, ...] = ()
 
     @classmethod
     def now(cls, **kwargs: object) -> "SecurityAlert":
@@ -137,6 +138,9 @@ class SecurityAlert:
 
         if self.iso_controls:
             doc.setdefault("compliance", {})["iso"] = list(self.iso_controls)
+
+        if self.compliance_tags:
+            doc.setdefault("compliance", {})["tags"] = list(self.compliance_tags)
 
         return doc
 

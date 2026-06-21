@@ -24,9 +24,21 @@ class TCPspecterApp(App):
     ]
 
     def on_mount(self) -> None:
+        import os, json
+        config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+        try:
+            with open(config_path, "r") as f:
+                config = json.load(f)
+                if config.get("ACTIVE_RESPONSE_ENABLED", False):
+                    self.notify("WARNING: ACTIVE_RESPONSE_ENABLED is True! System may alter connectivity.", title="TCPspecter", severity="warning", timeout=5)
+        except Exception:
+            pass
         self.push_screen(MainScreen())
 
 
 if __name__ == "__main__":
+    from core.response_engine import start_engine
+    start_engine()
+    
     app = TCPspecterApp()
     app.run()

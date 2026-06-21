@@ -26,7 +26,7 @@ import time
 from collections import Counter, OrderedDict, deque
 from typing import Final
 
-from scapy.all import sniff, IP, TCP, UDP, DNS, DNSQR  # type: ignore[import]
+from scapy.all import sniff, IP, IPv6, TCP, UDP, DNS, DNSQR  # type: ignore[import]
 
 from core.alerts import SecurityAlert, publish
 
@@ -92,6 +92,10 @@ _dns_tracker: dict[str, deque[float]] = {}
 _dns_dedup: set[int] = set()
 _dlp_dedup: set[int] = set()
 _dedup_lock = threading.Lock()
+
+# Port scan tracking
+# Key: (src_ip, dst_ip) -> (set of dst_ports, last_timestamp)
+_scan_tracker: dict[tuple[str, str], tuple[set[int], float]] = {}
 
 
 # ─── Utilidades puras (sin estado, 100% testeables) ──────────────────────────
@@ -234,6 +238,52 @@ def _publish_dlp_alert(
     ))
 
 
+def _publish_scan_alert(src_ip: str, dst_ip: str, description: str) -> None:
+    """Publica alerta de escaneo de puertos (NDR) con deduplicación O(1)."""
+    key = _dedup_key("ESCANEO PUERTOS", description)
+    with _dedup_lock:
+        if key in _dlp_dedup:
+            return
+        _dlp_dedup.add(key)
+        if len(_dlp_dedup) > _DEDUP_MAX_SIZE:
+            _dlp_dedup.clear()
+
+    publish(SecurityAlert.now(
+        engine="ndr",
+        category="Escaneo de Puertos",
+        severity="HIGH",
+        description=description,
+        source_ip=src_ip,
+        dest_ip=dst_ip,
+        mitre_technique_id="T1046",
+        mitre_technique_name="Network Service Discovery",
+        mitre_tactic="Discovery",
+        nist_controls=("DE.AE-2",),
+        iso_controls=("A.13.1.1",),
+    ))
+
+
+def _check_port_scan(src_ip: str, dst_ip: str, dst_port: int) -> None:
+    """Detecta escaneo de puertos (SYN scan) en una ventana deslizante de 10s."""
+    now = time.monotonic()
+    key = (src_ip, dst_ip)
+    with _lock:
+        if key not in _scan_tracker:
+            _scan_tracker[key] = (set(), now)
+        
+        ports, last_ts = _scan_tracker[key]
+        if now - last_ts > 10.0:
+            ports = set()
+        
+        ports.add(dst_port)
+        _scan_tracker[key] = (ports, now)
+        
+        if len(ports) >= 15:
+            description = f"Escaneo de puertos detectado desde {src_ip} hacia {dst_ip} ({len(ports)} puertos en <10s)"
+            ports.clear()  # reset to avoid flood
+            _publish_scan_alert(src_ip, dst_ip, description)
+
+
 # ─── Procesamiento de paquetes ────────────────────────────────────────────────
 
 def _process_dns(packet) -> None:
@@ -339,10 +389,16 @@ def packet_callback(packet) -> None:
             _stats["packet_count"] += 1
             _stats["bytes_total"] += len(packet)
 
-        if not packet.haslayer(IP):
+        if packet.haslayer(IP):
+            ip_layer = packet[IP]
+            src_ip = ip_layer.src
+            dst_ip = ip_layer.dst
+        elif packet.haslayer(IPv6):
+            ip_layer = packet[IPv6]
+            src_ip = ip_layer.src
+            dst_ip = ip_layer.dst
+        else:
             return
-
-        ip = packet[IP]
 
         if packet.haslayer(UDP) and packet[UDP].dport == 53:
             with _lock:
@@ -354,7 +410,17 @@ def packet_callback(packet) -> None:
         if packet.haslayer(TCP):
             with _lock:
                 _stats["tcp_count"] += 1
-            _process_tcp(packet, ip.src, ip.dst)
+            tcp = packet[TCP]
+            is_syn = False
+            if tcp.flags is not None:
+                try:
+                    flags_val = int(tcp.flags)
+                    is_syn = (flags_val & 0x02) != 0
+                except (ValueError, TypeError):
+                    is_syn = 'S' in str(tcp.flags)
+            if is_syn:
+                _check_port_scan(src_ip, dst_ip, tcp.dport)
+            _process_tcp(packet, src_ip, dst_ip)
 
     except Exception:
         # Debug level: paquetes malformados son comunes en redes reales.
@@ -375,12 +441,21 @@ def start_analyzer() -> bool:
 
     def _run() -> None:
         try:
-            sniff(
-                filter="udp port 53 or tcp",
-                prn=packet_callback,
-                store=False,       # store=False es más claro que store=0
-                stop_filter=lambda _: _stop_event.is_set(),
-            )
+            try:
+                sniff(
+                    iface="any",
+                    filter="udp port 53 or tcp",
+                    prn=packet_callback,
+                    store=False,
+                    stop_filter=lambda _: _stop_event.is_set(),
+                )
+            except Exception:
+                sniff(
+                    filter="udp port 53 or tcp",
+                    prn=packet_callback,
+                    store=False,
+                    stop_filter=lambda _: _stop_event.is_set(),
+                )
         except PermissionError:
             log.error(
                 "Scapy requiere CAP_NET_RAW para capturar paquetes. "

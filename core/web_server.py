@@ -6,7 +6,7 @@ import urllib.parse
 import asyncio
 import secrets
 import socket
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 import os
 import re
 import datetime
@@ -106,7 +106,7 @@ def _alert_callback(alert: SecurityAlert) -> None:
             _dns_alerts.append(alert_dict)
             if len(_dns_alerts) > 100:
                 _dns_alerts.pop(0)
-        elif alert.engine == "dlp":
+        else:
             _dlp_alerts.append(alert_dict)
             if len(_dlp_alerts) > 100:
                 _dlp_alerts.pop(0)
@@ -146,7 +146,7 @@ def log_security_finding(finding: dict, status: str = "DETECTED") -> None:
         iso_controls=tuple(finding.get("iso_controls") or ()),
     ))
 
-def get_parsed_logs() -> list[dict]:
+def get_parsed_logs(lang: str = "en") -> list[dict]:
     """
     Lee y parsea el archivo de log de texto de eventos de seguridad.
     Retorna los eventos más recientes primero.
@@ -163,14 +163,19 @@ def get_parsed_logs() -> list[dict]:
                     line.strip(),
                 )
                 if m:
+                    cat = m.group(4)
+                    desc = m.group(7)
+                    from core.interpreter import CATEGORY_TRANSLATIONS, translate_description
+                    translated_cat = CATEGORY_TRANSLATIONS.get(lang, {}).get(cat, cat)
+                    translated_desc = translate_description(desc, lang)
                     logs.append({
                         "timestamp": m.group(1),
                         "status":    m.group(2),
                         "severity":  m.group(3),
-                        "category":  m.group(4),
+                        "category":  translated_cat,
                         "pid":       m.group(5),
                         "proc_name": m.group(6),
-                        "description": m.group(7),
+                        "description": translated_desc,
                     })
     except OSError as exc:
         log.error("Error leyendo security_events.log: %s", exc)
@@ -187,7 +192,7 @@ _security_lock = threading.Lock()
 
 def _security_worker() -> None:
     """Background thread: refresca el análisis de seguridad cada 5s y publica eventos nuevos."""
-    global _active_findings
+    global _active_findings, _cached_security
     while True:
         try:
             result = analyze_zombie_status()
@@ -715,10 +720,15 @@ HTML_CONTENT = """<!DOCTYPE html>
                 <span class="status-dot"></span>
                 <span data-i18n="status_live">Monitoreo en Vivo</span>
             </div>
+            <div class="status-badge" style="background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); color: var(--text-main); font-weight: 500; gap: 12px;">
+                <span>CPU: <span id="sys_cpu" style="color: var(--primary); font-weight: 700;">0.0%</span></span>
+                <span style="border-left: 1px solid var(--card-border); padding-left: 12px;">RAM: <span id="sys_ram" style="color: var(--accent); font-weight: 700;">0.0%</span></span>
+            </div>
         </div>
     </header>
 
     <!-- SPA Wrappers -->
+    <div class="container">
     <!-- View: Dashboard -->
     <div id="view_dashboard" class="spa-view">
         <div class="dashboard-grid">
@@ -807,8 +817,7 @@ HTML_CONTENT = """<!DOCTYPE html>
             </div>
         </div>
     </div>
-
-    </div> <!-- End Dashboard Grid -->
+</div> <!-- End View: Dashboard -->
 
     <!-- View: Firewall -->
     <div id="view_firewall" class="spa-view" style="display:none;">
@@ -816,42 +825,42 @@ HTML_CONTENT = """<!DOCTYPE html>
         <div class="card" style="margin-bottom: 24px;" onclick="showModuleHelp('ids_fw', event)">
         <div class="connections-header" style="margin-bottom: 16px; border-bottom: 1px solid var(--card-border); padding-bottom: 12px;">
             <div class="connections-title">
-                <h2 style="font-size: 18px; color: var(--text-main); margin: 0;">Network Security Policies (Firewall & IDS)</h2>
-                <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Configuración avanzada de interfaces, IPS y filtrado de red</p>
+                <h2 data-i18n="fw_title" style="font-size: 18px; color: var(--text-main); margin: 0;">Network Security Policies (Firewall & IDS)</h2>
+                <p data-i18n="fw_subtitle" style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Configuración avanzada de interfaces, IPS y filtrado de red</p>
             </div>
             <div style="display: flex; gap: 12px; align-items: center;">
                 <div style="display: flex; flex-direction: column; align-items: flex-end; margin-right: 12px;">
                     <div style="display: flex; align-items: center; gap: 6px;">
-                        <strong style="font-size: 12px; color: var(--text-muted);">Servicio Snort:</strong>
+                        <strong data-i18n="fw_snort_lbl" style="font-size: 12px; color: var(--text-muted);">Servicio Snort:</strong>
                         <span id="snort_badge" class="severity-badge sev-bajo" style="font-size: 10px;">Cargando...</span>
                     </div>
                     <div id="snort_info" style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Detectando estado...</div>
                 </div>
-                <button id="install_snort_btn" onclick="installSnort()" style="display: none; background: rgba(74, 122, 157, 0.15); border: 1px solid var(--primary); color: var(--text-main); padding: 8px 16px; border-radius: 6px; font-size: 12px; cursor: pointer; font-weight: 600; transition: all 0.2s;">Instalar Snort</button>
-                <button id="toggle_snort_btn" onclick="toggleSnort()" style="background: rgba(255,255,255,0.05); border: 1px solid var(--card-border); color: var(--text-main); padding: 8px 16px; border-radius: 6px; font-size: 12px; cursor: pointer; font-weight: 600; transition: all 0.2s;">Iniciar/Detener</button>
+                <button id="install_snort_btn" onclick="installSnort()" style="display: none; background: rgba(74, 122, 157, 0.15); border: 1px solid var(--primary); color: var(--text-main); padding: 8px 16px; border-radius: 6px; font-size: 12px; cursor: pointer; font-weight: 600; transition: all 0.2s;" data-i18n="fw_install_btn">Instalar Snort</button>
+                <button id="toggle_snort_btn" onclick="toggleSnort()" style="background: rgba(255,255,255,0.05); border: 1px solid var(--card-border); color: var(--text-main); padding: 8px 16px; border-radius: 6px; font-size: 12px; cursor: pointer; font-weight: 600; transition: all 0.2s;" data-i18n="fw_toggle_btn">Iniciar/Detener</button>
             </div>
         </div>
 
         <!-- Enterprise Rule Builder -->
         <div style="background: rgba(13, 19, 31, 0.4); border: 1px solid var(--card-border); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-                <strong style="font-size: 14px; color: var(--primary);">+ Nueva Regla de Cortafuegos (Rule Builder)</strong>
+                <strong data-i18n="fw_builder_title" style="font-size: 14px; color: var(--primary);">+ Nueva Regla de Cortafuegos (Rule Builder)</strong>
                 <div style="display: flex; gap: 8px;">
                     <input type="text" id="block_ip_input" placeholder="Quick Block: IP a bloquear" style="width: 220px; background: rgba(17, 24, 39, 0.8); border: 1px solid var(--card-border); border-radius: 6px; padding: 6px 12px; color: var(--text-main); outline: none; font-size: 12px;">
-                    <button onclick="blockIP()" style="background: rgba(248, 113, 113, 0.15); border: 1px solid var(--danger); color: var(--danger); padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-weight: 600;">Drop (Quick)</button>
+                    <button onclick="blockIP()" style="background: rgba(248, 113, 113, 0.15); border: 1px solid var(--danger); color: var(--danger); padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-weight: 600;" data-i18n="fw_drop_btn">Drop (Quick)</button>
                 </div>
             </div>
             
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; align-items: end;">
                 <div>
-                    <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 6px; font-weight: 600;">Acción *</label>
+                    <label data-i18n="fw_action_lbl" style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 6px; font-weight: 600;">Acción *</label>
                     <select id="rb_action" style="width: 100%; background: rgba(17, 24, 39, 0.8); border: 1px solid var(--card-border); border-radius: 6px; padding: 8px; color: var(--text-main); font-size: 12px; outline: none; cursor: pointer;">
-                        <option value="DENY">Bloquear (DENY)</option>
-                        <option value="ALLOW">Permitir (ALLOW)</option>
+                        <option value="DENY" data-i18n="fw_opt_deny">Bloquear (DENY)</option>
+                        <option value="ALLOW" data-i18n="fw_opt_allow">Permitir (ALLOW)</option>
                     </select>
                 </div>
                 <div>
-                    <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 6px; font-weight: 600;">Protocolo</label>
+                    <label data-i18n="fw_proto_lbl" style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 6px; font-weight: 600;">Protocolo</label>
                     <select id="rb_protocol" style="width: 100%; background: rgba(17, 24, 39, 0.8); border: 1px solid var(--card-border); border-radius: 6px; padding: 8px; color: var(--text-main); font-size: 12px; outline: none; cursor: pointer;">
                         <option value="all">ALL</option>
                         <option value="tcp">TCP</option>
@@ -860,39 +869,39 @@ HTML_CONTENT = """<!DOCTYPE html>
                     </select>
                 </div>
                 <div>
-                    <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 6px; font-weight: 600;">IP Origen</label>
+                    <label data-i18n="fw_src_lbl" style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 6px; font-weight: 600;">IP Origen</label>
                     <input type="text" id="rb_src_ip" placeholder="Cualquiera" style="width: 100%; background: rgba(17, 24, 39, 0.8); border: 1px solid var(--card-border); border-radius: 6px; padding: 8px; color: var(--text-main); font-size: 12px; outline: none;">
                 </div>
                 <div>
-                    <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 6px; font-weight: 600;">IP Destino</label>
+                    <label data-i18n="fw_dst_lbl" style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 6px; font-weight: 600;">IP Destino</label>
                     <input type="text" id="rb_dst_ip" placeholder="Cualquiera" style="width: 100%; background: rgba(17, 24, 39, 0.8); border: 1px solid var(--card-border); border-radius: 6px; padding: 8px; color: var(--text-main); font-size: 12px; outline: none;">
                 </div>
                 <div>
-                    <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 6px; font-weight: 600;">Puerto</label>
+                    <label data-i18n="fw_port_lbl" style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 6px; font-weight: 600;">Puerto</label>
                     <input type="number" id="rb_port" placeholder="Todos" style="width: 100%; background: rgba(17, 24, 39, 0.8); border: 1px solid var(--card-border); border-radius: 6px; padding: 8px; color: var(--text-main); font-size: 12px; outline: none;">
                 </div>
                 <div>
-                    <button onclick="addCustomRule()" style="width: 100%; background: rgba(74, 122, 157, 0.2); border: 1px solid var(--primary); color: var(--text-main); padding: 9px; border-radius: 6px; font-size: 12px; cursor: pointer; font-weight: 600; transition: background 0.2s;">Aplicar Regla</button>
+                    <button onclick="addCustomRule()" style="width: 100%; background: rgba(74, 122, 157, 0.2); border: 1px solid var(--primary); color: var(--text-main); padding: 9px; border-radius: 6px; font-size: 12px; cursor: pointer; font-weight: 600; transition: background 0.2s;" data-i18n="fw_apply_btn">Aplicar Regla</button>
                 </div>
             </div>
         </div>
 
         <!-- Active Rules Table -->
         <div style="margin-top: 16px;">
-            <strong style="font-size: 14px; display: block; margin-bottom: 12px; color: var(--text-main);">Reglas Cortafuegos Activas:</strong>
+            <strong data-i18n="fw_active_rules_lbl" style="font-size: 14px; display: block; margin-bottom: 12px; color: var(--text-main);">Reglas Cortafuegos Activas:</strong>
             <div class="table-container" style="max-height: 250px; border: 1px solid var(--card-border); border-radius: 8px; overflow: hidden;">
                 <table style="font-size: 12px; width: 100%; border-collapse: collapse;">
                     <thead>
                         <tr style="background: rgba(17, 24, 39, 0.9); border-bottom: 1px solid var(--card-border);">
-                            <th style="padding: 12px; text-align: left; color: var(--text-muted); font-weight: 600;">Regla / IP Afectada</th>
-                            <th style="padding: 12px; text-align: left; color: var(--text-muted); font-weight: 600;">Gestor (Backend)</th>
-                            <th style="padding: 12px; text-align: left; color: var(--text-muted); font-weight: 600;">Política (Target)</th>
-                            <th style="padding: 12px; text-align: left; color: var(--text-muted); font-weight: 600; width: 100px;">Acción</th>
+                            <th data-i18n="fw_tbl_rule" style="padding: 12px; text-align: left; color: var(--text-muted); font-weight: 600;">Regla / IP Afectada</th>
+                            <th data-i18n="fw_tbl_backend" style="padding: 12px; text-align: left; color: var(--text-muted); font-weight: 600;">Gestor (Backend)</th>
+                            <th data-i18n="fw_tbl_policy" style="padding: 12px; text-align: left; color: var(--text-muted); font-weight: 600;">Política (Target)</th>
+                            <th data-i18n="fw_tbl_action" style="padding: 12px; text-align: left; color: var(--text-muted); font-weight: 600; width: 100px;">Acción</th>
                         </tr>
                     </thead>
                     <tbody id="firewall_tbody">
                         <tr>
-                            <td colspan="4" style="text-align: center; color: var(--text-muted); padding: 20px 0;">Cargando reglas...</td>
+                            <td colspan="4" style="text-align: center; color: var(--text-muted); padding: 20px 0;" data-i18n="fw_tbl_loading">Cargando reglas...</td>
                         </tr>
                     </tbody>
                 </table>
@@ -900,13 +909,17 @@ HTML_CONTENT = """<!DOCTYPE html>
         </div>
     </div> <!-- End View: Firewall -->
 
+    <!-- Shared Map & Connections Container -->
+    <div id="shared_monitoring">
+
     <!-- Cyber-Node Global Map Section -->
     <div class="card" style="margin-bottom: 24px;" onclick="showModuleHelp('map', event)">
-        <div class="connections-header" style="margin-bottom: 0;">
+        <div class="connections-header" style="margin-bottom: 0; display: flex; justify-content: space-between; align-items: center;">
             <div class="connections-title">
-                <h2>Mapa Global de Conexiones</h2>
-                <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Análisis de Nodos de Tráfico en Tiempo Real</p>
+                <h2 data-i18n="map_title">Mapa Global de Conexiones</h2>
+                <p data-i18n="map_desc" style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Análisis de Nodos de Tráfico en Tiempo Real</p>
             </div>
+            <button onclick="resetMapView(); event.stopPropagation();" style="background: rgba(74, 122, 157, 0.15); border: 1px solid var(--primary); color: var(--text-main); padding: 6px 14px; border-radius: 6px; font-size: 12px; cursor: pointer; font-weight: 600;" data-i18n="map_recenter_btn">Recentrar Mapa</button>
         </div>
         <div id="globeChart" style="width: 100%; height: 500px;"></div>
     </div>
@@ -915,8 +928,8 @@ HTML_CONTENT = """<!DOCTYPE html>
     <div class="card" onclick="showModuleHelp('connections', event)">
         <div class="connections-header">
             <div class="connections-title">
-                <h2>Conexiones del Sistema Activas</h2>
-                <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Selecciona cualquier fila para traducir e interpretar lo que está pasando en la red.</p>
+                <h2 data-i18n="conns_title">Conexiones del Sistema Activas</h2>
+                <p data-i18n="conns_desc" style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Selecciona cualquier fila para traducir e interpretar lo que está pasando en la red.</p>
             </div>
             <div class="search-box">
                 <input type="text" class="search-input" id="search_bar" placeholder="Buscar (proceso, PID, IP, puerto, estado)..." oninput="filterTable()">
@@ -927,26 +940,26 @@ HTML_CONTENT = """<!DOCTYPE html>
             <table>
                 <thead>
                     <tr>
-                        <th>Proceso</th>
-                        <th>PID</th>
-                        <th>Proto</th>
-                        <th>IP Origen</th>
-                        <th>Pto Orig.</th>
-                        <th>IP Destino</th>
-                        <th>Pto Dest.</th>
-                        <th>Estado</th>
-                        <th>Evaluación</th>
+                        <th data-i18n="hdr_proc">Proceso</th>
+                        <th data-i18n="hdr_pid">PID</th>
+                        <th data-i18n="hdr_proto">Proto</th>
+                        <th data-i18n="hdr_src_ip">IP Origen</th>
+                        <th data-i18n="hdr_src_port">Pto Orig.</th>
+                        <th data-i18n="hdr_dst_ip">IP Destino</th>
+                        <th data-i18n="hdr_dst_port">Pto Dest.</th>
+                        <th data-i18n="hdr_status">Estado</th>
+                        <th data-i18n="hdr_eval">Evaluación</th>
                     </tr>
                 </thead>
                 <tbody id="connections_tbody">
                     <tr>
-                        <td colspan="9" style="text-align: center; color: var(--text-muted); padding: 40px 0;">Cargando conexiones del sistema...</td>
+                        <td colspan="9" style="text-align: center; color: var(--text-muted); padding: 40px 0;" data-i18n="conns_loading">Cargando conexiones del sistema...</td>
                     </tr>
                 </tbody>
             </table>
         </div>
     </div>
-    </div> <!-- End View: Dashboard (Contains Map and Connections) -->
+    </div> <!-- End Shared Monitoring -->
 
     <!-- View: Configuration -->
     <div id="view_configuration" class="spa-view" style="display:none;">
@@ -957,25 +970,26 @@ HTML_CONTENT = """<!DOCTYPE html>
                 <h3 data-i18n="config_lang">Idioma / Language</h3>
                 <p data-i18n="config_lang_desc" style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">Selecciona el idioma de la interfaz gráfica.</p>
                 <div style="display: flex; gap: 12px;">
-                    <button onclick="changeLanguage('es')" style="background: rgba(74, 122, 157, 0.15); border: 1px solid var(--primary); color: var(--text-main); padding: 8px 24px; border-radius: 8px; cursor: pointer; font-weight: 600;">Español</button>
-                    <button onclick="changeLanguage('en')" style="background: rgba(255,255,255,0.05); border: 1px solid var(--card-border); color: var(--text-main); padding: 8px 24px; border-radius: 8px; cursor: pointer; font-weight: 600;">English</button>
+                    <button class="lang-btn" data-lang="es" onclick="changeLanguage('es')" style="background: rgba(74, 122, 157, 0.15); border: 1px solid var(--primary); color: var(--text-main); padding: 8px 24px; border-radius: 8px; cursor: pointer; font-weight: 600;">Español</button>
+                    <button class="lang-btn" data-lang="en" onclick="changeLanguage('en')" style="background: rgba(255,255,255,0.05); border: 1px solid var(--card-border); color: var(--text-main); padding: 8px 24px; border-radius: 8px; cursor: pointer; font-weight: 600;">English</button>
                 </div>
             </div>
 
             <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--card-border); padding: 16px; border-radius: 12px;">
                 <h3 data-i18n="config_tutorial">Tutoriales y Documentación</h3>
                 <p data-i18n="config_tutorial_desc" style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">Aprende cómo usar TCPspecter y explorar sus capacidades.</p>
-                <a href="/tutorial" style="display: inline-block; background: rgba(52, 211, 153, 0.15); border: 1px solid var(--success); color: var(--success); padding: 8px 24px; border-radius: 8px; cursor: pointer; font-weight: 600; text-decoration: none;" data-i18n="nav_tutorial">Ver Tutorial Interactivo</a>
+                <a href="/tutorial" style="display: inline-block; background: rgba(52, 211, 153, 0.15); border: 1px solid var(--success); color: var(--success); padding: 8px 24px; border-radius: 8px; cursor: pointer; font-weight: 600; text-decoration: none;" data-i18n="config_tutorial_btn">Ver Tutorial Interactivo</a>
             </div>
         </div>
     </div> <!-- End View: Configuration -->
+    </div> <!-- End Container -->
 
     <!-- Interpretation Dialog Modal -->
     <div class="modal" id="interpret_modal">
         <div class="modal-content">
             <span class="close-btn" onclick="closeModal()">&times;</span>
             <div class="modal-header">
-                <h3 id="modal_proc_title">Interpretación de Conexión</h3>
+                <h3 id="modal_proc_title" data-i18n="modal_title">Interpretación de Conexión</h3>
                 <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;" id="modal_socket_title">PID: - | TCP | -</p>
             </div>
             <div class="modal-body">
@@ -983,27 +997,27 @@ HTML_CONTENT = """<!DOCTYPE html>
                     Evaluación de Riesgo: -
                 </div>
                 <div class="info-block" id="modal_ip_block">
-                    <h4>Ámbito de la IP Destino</h4>
+                    <h4 data-i18n="modal_ip_scope">Ámbito de la IP Destino</h4>
                     <p>-</p>
                 </div>
                 <div class="info-block" id="modal_port_block">
-                    <h4>Propósito del Puerto</h4>
+                    <h4 data-i18n="modal_port_purpose">Propósito del Puerto</h4>
                     <p>-</p>
                 </div>
                 <div class="info-block" id="modal_status_block">
-                    <h4>Estado de la Conexión</h4>
+                    <h4 data-i18n="modal_conn_state">Estado de la Conexión</h4>
                     <p>-</p>
                 </div>
                 <div class="info-block block-danger" id="modal_danger_block">
-                    <h4>Análisis de Seguridad Detallado</h4>
+                    <h4 data-i18n="modal_sec_analysis">Análisis de Seguridad Detallado</h4>
                     <p>-</p>
                 </div>
                 <div class="info-block" id="modal_recommendation_block">
-                    <h4>Recomendaciones</h4>
+                    <h4 data-i18n="modal_recs">Recomendaciones</h4>
                     <p>-</p>
                 </div>
                 <div class="info-block" id="modal_educational_block">
-                    <h4>Contexto Educativo</h4>
+                    <h4 data-i18n="modal_edu">Contexto Educativo</h4>
                     <p>-</p>
                 </div>
             </div>
@@ -1043,8 +1057,12 @@ HTML_CONTENT = """<!DOCTYPE html>
                     backgroundColor: 'transparent',
                     geo: {
                         map: 'world',
-                        roam: false,
+                        roam: true,
                         zoom: 1.2,
+                        scaleLimit: {
+                            min: 1.0,
+                            max: 8.0
+                        },
                         itemStyle: {
                             areaColor: 'rgba(17, 24, 39, 0.8)',
                             borderColor: '#4a7a9d',
@@ -1069,6 +1087,7 @@ HTML_CONTENT = """<!DOCTYPE html>
                     series: [
                         {
                             type: 'lines',
+                            coordinateSystem: 'geo',
                             zlevel: 1,
                             polyline: true, // IMPORTANT for drawing multiple hops
                             effect: {
@@ -1098,6 +1117,17 @@ HTML_CONTENT = """<!DOCTYPE html>
                 globeChart.setOption(option);
             } catch (err) {
                 console.error("Error cargando el mapa:", err);
+            }
+        }
+
+        function resetMapView() {
+            if (globeChart) {
+                globeChart.setOption({
+                    geo: {
+                        zoom: 1.2,
+                        center: null
+                    }
+                });
             }
         }
 
@@ -1219,9 +1249,20 @@ HTML_CONTENT = """<!DOCTYPE html>
 
         async function refreshData() {
             try {
-                const response = await fetch('/api/data');
+                const lang = localStorage.getItem('language') || 'en';
+                const response = await fetch(`/api/data?lang=${lang}`);
                 const data = await response.json();
                 currentFirewallBackend = data.firewall.backend;
+
+                // Update CPU & RAM headers
+                const cpuEl = document.getElementById('sys_cpu');
+                const ramEl = document.getElementById('sys_ram');
+                if (cpuEl) cpuEl.innerText = `${data.cpu.toFixed(1)}%`;
+                if (ramEl) {
+                    const usedGb = (data.used_ram / (1024 * 1024 * 1024)).toFixed(2);
+                    const totalGb = (data.total_ram / (1024 * 1024 * 1024)).toFixed(2);
+                    ramEl.innerText = `${data.ram.toFixed(1)}% (${usedGb} GB / ${totalGb} GB)`;
+                }
 
                 // 1. Update Security Panel
                 document.getElementById('risk_score').innerText = data.security.score;
@@ -1547,8 +1588,16 @@ HTML_CONTENT = """<!DOCTYPE html>
 
                     globeChart.setOption({
                         series: [
-                            { data: linesData },
-                            { data: uniqueScatter }
+                            {
+                                type: 'lines',
+                                coordinateSystem: 'geo',
+                                data: linesData
+                            },
+                            {
+                                type: 'effectScatter',
+                                coordinateSystem: 'geo',
+                                data: uniqueScatter
+                            }
                         ]
                     });
                 }
@@ -1612,19 +1661,29 @@ HTML_CONTENT = """<!DOCTYPE html>
         function openModal(idx) {
             const conn = allConnections[idx];
             if (!conn) return;
+            const lang = localStorage.getItem('language') || 'en';
 
-            document.getElementById('modal_proc_title').innerText = `Interpretación de '${conn.name}'`;
-            document.getElementById('modal_socket_title').innerText = `PID: ${conn.pid} | Protocolo: ${conn.proto} | IP Destino: ${conn.raddr_ip}:${conn.raddr_port}`;
+            if (lang === 'es') {
+                document.getElementById('modal_proc_title').innerText = `Interpretación de '${conn.name}'`;
+                document.getElementById('modal_socket_title').innerText = `PID: ${conn.pid} | Protocolo: ${conn.proto} | IP Destino: ${conn.raddr_ip}:${conn.raddr_port}`;
+            } else {
+                document.getElementById('modal_proc_title').innerText = `Interpretation of '${conn.name}'`;
+                document.getElementById('modal_socket_title').innerText = `PID: ${conn.pid} | Protocol: ${conn.proto} | Destination IP: ${conn.raddr_ip}:${conn.raddr_port}`;
+            }
             
             const banner = document.getElementById('modal_banner');
-            banner.innerText = `Evaluación: ${conn.interpretation.assessment}`;
+            if (lang === 'es') {
+                banner.innerText = `Evaluación: ${conn.interpretation.assessment}`;
+            } else {
+                banner.innerText = `Assessment: ${conn.interpretation.assessment}`;
+            }
             
             let bannerBg = 'rgba(52, 211, 153, 0.15)';
             let bannerColor = 'var(--success)';
-            if (conn.interpretation.assessment.includes('CRÍTICO')) {
+            if (conn.interpretation.assessment.includes('CRÍTICO') || conn.interpretation.assessment.includes('CRITICAL')) {
                 bannerBg = 'rgba(248, 113, 113, 0.15)';
                 bannerColor = 'var(--danger)';
-            } else if (conn.interpretation.assessment.includes('REVISAR')) {
+            } else if (conn.interpretation.assessment.includes('REVISAR') || conn.interpretation.assessment.includes('SUSPICIOUS')) {
                 bannerBg = 'rgba(251, 191, 36, 0.15)';
                 bannerColor = 'var(--warning)';
             }
@@ -1637,7 +1696,11 @@ HTML_CONTENT = """<!DOCTYPE html>
             document.getElementById('modal_danger_block').querySelector('p').innerText = conn.interpretation.explanation;
             
             const recs = conn.interpretation.recommendations || [];
-            document.getElementById('modal_recommendation_block').querySelector('p').innerText = recs.length > 0 ? "• " + recs.join("\\n• ") : "No hay recomendaciones específicas.";
+            if (recs.length > 0) {
+                document.getElementById('modal_recommendation_block').querySelector('p').innerText = `• ${recs.join('\\n• ')}`;
+            } else {
+                document.getElementById('modal_recommendation_block').querySelector('p').innerText = lang === 'es' ? "No hay recomendaciones específicas." : "No specific recommendations.";
+            }
             
             document.getElementById('modal_educational_block').querySelector('p').innerText = conn.interpretation.educational || "-";
 
@@ -1666,46 +1729,58 @@ HTML_CONTENT = """<!DOCTYPE html>
         }
 
         async function installSnort() {
-            let warnMsg = '¿Estás seguro de que deseas instalar Snort? Se realizará de forma no interactiva (apt-get install -y snort).';
+            const lang = localStorage.getItem('language') || 'en';
+            let warnMsg = lang === 'es'
+                ? '¿Estás seguro de que deseas instalar Snort? Se realizará de forma no interactiva (apt-get install -y snort).'
+                : 'Are you sure you want to install Snort? It will be done non-interactively (apt-get install -y snort).';
             if (currentFirewallBackend !== 'none') {
-                warnMsg = '⚠️ ADVERTENCIA: Se ha detectado un Firewall activo (' + currentFirewallBackend.toUpperCase() + ') en el sistema. La instalación de Snort puede interferir con la captura de paquetes o requerir reglas adicionales de filtrado para no bloquear tráfico legítimo.\\n\\n' + warnMsg;
+                warnMsg = lang === 'es'
+                    ? '⚠️ ADVERTENCIA: Se ha detectado un Firewall activo (' + currentFirewallBackend.toUpperCase() + ') en el sistema. La instalación de Snort puede interferir con la captura de paquetes o requerir reglas adicionales de filtrado para no bloquear tráfico legítimo.\\n\\n' + warnMsg
+                    : '⚠️ WARNING: An active Firewall (' + currentFirewallBackend.toUpperCase() + ') has been detected on the system. Installing Snort may interfere with packet capture or require additional filtering rules to avoid blocking legitimate traffic.\\n\\n' + warnMsg;
             }
             if (!confirm(warnMsg)) {
                 return;
             }
             const btn = document.getElementById('install_snort_btn');
-            btn.innerText = 'Instalando...';
+            btn.innerText = lang === 'es' ? 'Instalando...' : 'Installing...';
             btn.disabled = true;
             try {
                 const res = await fetch('/api/install_snort', { method: 'POST' });
                 const data = await res.json();
                 alert(data.message);
             } catch(e) {
-                alert('Error al instalar Snort: ' + e);
+                alert((lang === 'es' ? 'Error al instalar Snort: ' : 'Error installing Snort: ') + e);
             } finally {
                 refreshData();
             }
         }
 
         async function toggleSnort() {
+            const lang = localStorage.getItem('language') || 'en';
             try {
                 const res = await fetch('/api/toggle_snort', { method: 'POST' });
                 const data = await res.json();
                 if (!data.success) {
-                    alert('Operación fallida. Asegúrate de ejecutar tcpspecter con privilegios de root/sudo.');
+                    alert(lang === 'es'
+                        ? 'Operación fallida. Asegúrate de ejecutar tcpspecter con privilegios de root/sudo.'
+                        : 'Operation failed. Make sure to run tcpspecter with root/sudo privileges.');
                 }
             } catch(e) {
-                alert('Error al alternar Snort: ' + e);
+                alert((lang === 'es' ? 'Error al alternar Snort: ' : 'Error toggling Snort: ') + e);
             } finally {
                 refreshData();
             }
         }
 
         async function blockIP(ip) {
+            const lang = localStorage.getItem('language') || 'en';
             const ipToBlock = ip || document.getElementById('block_ip_input').value.trim();
             if (!ipToBlock) return;
             
-            if (!confirm(`¿Bloquear tráfico de la IP ${ipToBlock}?`)) return;
+            const confirmMsg = lang === 'es'
+                ? `¿Bloquear tráfico de la IP ${ipToBlock}?`
+                : `Block traffic from IP ${ipToBlock}?`;
+            if (!confirm(confirmMsg)) return;
             
             try {
                 const res = await fetch('/api/block_ip', {
@@ -1717,7 +1792,9 @@ HTML_CONTENT = """<!DOCTYPE html>
                 if (data.success) {
                     if (!ip) document.getElementById('block_ip_input').value = '';
                 } else {
-                    alert('Error al bloquear la IP. ¿Tienes permisos sudo?');
+                    alert(lang === 'es'
+                        ? 'Error al bloquear la IP. ¿Tienes permisos sudo?'
+                        : 'Error blocking IP. Do you have sudo privileges?');
                 }
             } catch(e) {
                 alert('Error: ' + e);
@@ -1727,8 +1804,12 @@ HTML_CONTENT = """<!DOCTYPE html>
         }
 
         async function unblockIP(ip) {
+            const lang = localStorage.getItem('language') || 'en';
             if (!ip) return;
-            if (!confirm(`¿Desbloquear tráfico de la IP ${ip}?`)) return;
+            const confirmMsg = lang === 'es'
+                ? `¿Desbloquear tráfico de la IP ${ip}?`
+                : `Unblock traffic from IP ${ip}?`;
+            if (!confirm(confirmMsg)) return;
             
             try {
                 const res = await fetch('/api/unblock_ip', {
@@ -1738,7 +1819,9 @@ HTML_CONTENT = """<!DOCTYPE html>
                 });
                 const data = await res.json();
                 if (!data.success) {
-                    alert('Error al desbloquear la IP. ¿Tienes permisos sudo?');
+                    alert(lang === 'es'
+                        ? 'Error al desbloquear la IP. ¿Tienes permisos sudo?'
+                        : 'Error unblocking IP. Do you have sudo privileges?');
                 }
             } catch(e) {
                 alert('Error: ' + e);
@@ -1748,13 +1831,17 @@ HTML_CONTENT = """<!DOCTYPE html>
         }
 
         async function addCustomRule() {
+            const lang = localStorage.getItem('language') || 'en';
             const action = document.getElementById('rb_action').value;
             const protocol = document.getElementById('rb_protocol').value;
             const src_ip = document.getElementById('rb_src_ip').value.trim();
             const dst_ip = document.getElementById('rb_dst_ip').value.trim();
             const port = document.getElementById('rb_port').value.trim();
             
-            if (!confirm(`¿Aplicar nueva regla de firewall?\\nAcción: ${action}\\nProtocolo: ${protocol}\\nOrigen: ${src_ip || 'Cualquiera'}\\nDestino: ${dst_ip || 'Cualquiera'}\\nPuerto: ${port || 'Todos'}`)) return;
+            const confirmMsg = lang === 'es'
+                ? `¿Aplicar nueva regla de firewall?\nAcción: ${action}\nProtocolo: ${protocol}\nOrigen: ${src_ip || 'Cualquiera'}\nDestino: ${dst_ip || 'Cualquiera'}\nPuerto: ${port || 'Todos'}`
+                : `Apply new firewall rule?\nAction: ${action}\nProtocol: ${protocol}\nSource: ${src_ip || 'Any'}\nDestination: ${dst_ip || 'Any'}\nPort: ${port || 'All'}`;
+            if (!confirm(confirmMsg)) return;
             
             try {
                 const res = await fetch('/api/firewall/rules', {
@@ -1767,9 +1854,12 @@ HTML_CONTENT = """<!DOCTYPE html>
                     document.getElementById('rb_src_ip').value = '';
                     document.getElementById('rb_dst_ip').value = '';
                     document.getElementById('rb_port').value = '';
-                    alert('Regla de firewall aplicada correctamente.');
+                    alert(lang === 'es'
+                        ? 'Regla de firewall aplicada correctamente.'
+                        : 'Firewall rule applied successfully.');
                 } else {
-                    alert('Error: ' + (data.error || 'Operación fallida. ¿Tienes permisos sudo?'));
+                    const fallbackError = lang === 'es' ? 'Operación fallida. ¿Tienes permisos sudo?' : 'Operation failed. Do you have sudo privileges?';
+                    alert('Error: ' + (data.error || fallbackError));
                 }
             } catch(e) {
                 alert('Error: ' + e);
@@ -1805,11 +1895,60 @@ HTML_CONTENT = """<!DOCTYPE html>
                 config_lang: "Idioma / Language",
                 config_lang_desc: "Selecciona el idioma de la interfaz gráfica.",
                 config_tutorial: "Tutoriales y Documentación",
-                config_tutorial_desc: "Aprende cómo usar TCPspecter y explorar sus capacidades."
+                config_tutorial_desc: "Aprende cómo usar TCPspecter y explorar sus capacidades.",
+                config_tutorial_btn: "Ver Tutorial Interactivo",
+                // Firewall view keys
+                fw_title: "Políticas de Seguridad de Red (Firewall e IDS)",
+                fw_subtitle: "Configuración avanzada de interfaces, IPS y filtrado de red",
+                fw_snort_lbl: "Servicio Snort:",
+                fw_install_btn: "Instalar Snort",
+                fw_toggle_btn: "Iniciar/Detener",
+                fw_builder_title: "+ Nueva Regla de Cortafuegos (Rule Builder)",
+                fw_drop_btn: "Bloquear (Quick)",
+                fw_action_lbl: "Acción *",
+                fw_opt_deny: "Bloquear (DENY)",
+                fw_opt_allow: "Permitir (ALLOW)",
+                fw_proto_lbl: "Protocolo",
+                fw_src_lbl: "IP Origen",
+                fw_dst_lbl: "IP Destino",
+                fw_port_lbl: "Puerto",
+                fw_apply_btn: "Aplicar Regla",
+                fw_active_rules_lbl: "Reglas Cortafuegos Activas:",
+                fw_tbl_rule: "Regla / IP Afectada",
+                fw_tbl_backend: "Gestor (Backend)",
+                fw_tbl_policy: "Política (Target)",
+                fw_tbl_action: "Acción",
+                fw_tbl_loading: "Cargando reglas...",
+                // Map view keys
+                map_title: "Mapa Global de Conexiones",
+                map_desc: "Análisis de Nodos de Tráfico en Tiempo Real",
+                map_recenter_btn: "Recentrar Mapa",
+                // Connections view keys
+                conns_title: "Conexiones del Sistema Activas",
+                conns_desc: "Selecciona cualquier fila para traducir e interpretar lo que está pasando en la red.",
+                conns_loading: "Cargando conexiones del sistema...",
+                hdr_proc: "Proceso",
+                hdr_pid: "PID",
+                hdr_proto: "Proto",
+                hdr_src_ip: "IP Origen",
+                hdr_src_port: "Pto Orig.",
+                hdr_dst_ip: "IP Destino",
+                hdr_dst_port: "Pto Dest.",
+                hdr_status: "Estado",
+                hdr_eval: "Evaluación",
+                // Modal translation keys
+                modal_title: "Interpretación de Conexión",
+                modal_ip_scope: "Ámbito de la IP Destino",
+                modal_port_purpose: "Propósito del Puerto",
+                modal_conn_state: "Estado de la Conexión",
+                modal_sec_analysis: "Análisis de Seguridad Detallado",
+                modal_recs: "Recomendaciones",
+                modal_edu: "Contexto Educativo"
             },
             en: {
                 subtitle: "Network Security Analytics — DLP + NDR + NTA + Explanation Engine",
                 nav_tutorial: "📖 Tutorial",
+                nav_logs: "📄 Security Logs",
                 btn_sec_active: "● SECURITY ANALYTICS ACTIVE",
                 btn_sec_inactive: "○ SECURITY ANALYTICS INACTIVE",
                 status_live: "Live Monitoring",
@@ -1832,7 +1971,55 @@ HTML_CONTENT = """<!DOCTYPE html>
                 config_lang: "Language / Idioma",
                 config_lang_desc: "Select the graphical interface language.",
                 config_tutorial: "Tutorials & Documentation",
-                config_tutorial_desc: "Learn how to use TCPspecter and explore its capabilities."
+                config_tutorial_desc: "Learn how to use TCPspecter and explore its capabilities.",
+                config_tutorial_btn: "View Interactive Tutorial",
+                // Firewall view keys
+                fw_title: "Network Security Policies (Firewall & IDS)",
+                fw_subtitle: "Advanced interface, IPS and network filtering configuration",
+                fw_snort_lbl: "Snort Service:",
+                fw_install_btn: "Install Snort",
+                fw_toggle_btn: "Start/Stop",
+                fw_builder_title: "+ New Firewall Rule (Rule Builder)",
+                fw_drop_btn: "Drop (Quick)",
+                fw_action_lbl: "Action *",
+                fw_opt_deny: "Block (DENY)",
+                fw_opt_allow: "Allow (ALLOW)",
+                fw_proto_lbl: "Protocol",
+                fw_src_lbl: "Source IP",
+                fw_dst_lbl: "Destination IP",
+                fw_port_lbl: "Port",
+                fw_apply_btn: "Apply Rule",
+                fw_active_rules_lbl: "Active Firewall Rules:",
+                fw_tbl_rule: "Rule / Affected IP",
+                fw_tbl_backend: "Manager (Backend)",
+                fw_tbl_policy: "Policy (Target)",
+                fw_tbl_action: "Action",
+                fw_tbl_loading: "Loading rules...",
+                // Map view keys
+                map_title: "Global Connection Map",
+                map_desc: "Real-Time Traffic Node Analysis",
+                map_recenter_btn: "Recenter Map",
+                // Connections view keys
+                conns_title: "Active System Connections",
+                conns_desc: "Select any row to translate and interpret what is happening in the network.",
+                conns_loading: "Loading system connections...",
+                hdr_proc: "Process",
+                hdr_pid: "PID",
+                hdr_proto: "Proto",
+                hdr_src_ip: "Source IP",
+                hdr_src_port: "Src Port",
+                hdr_dst_ip: "Dest IP",
+                hdr_dst_port: "Dst Port",
+                hdr_status: "State",
+                hdr_eval: "Assessment",
+                // Modal translation keys
+                modal_title: "Connection Interpretation",
+                modal_ip_scope: "Destination IP Scope",
+                modal_port_purpose: "Port Purpose",
+                modal_conn_state: "Connection State",
+                modal_sec_analysis: "Detailed Security Analysis",
+                modal_recs: "Recommendations",
+                modal_edu: "Educational Context"
             }
         };
 
@@ -1842,7 +2029,7 @@ HTML_CONTENT = """<!DOCTYPE html>
         }
 
         function applyLanguage() {
-            const lang = localStorage.getItem('language') || 'es';
+            const lang = localStorage.getItem('language') || 'en';
             document.querySelectorAll('[data-i18n]').forEach(el => {
                 const key = el.getAttribute('data-i18n');
                 if (translations[lang][key]) {
@@ -1853,6 +2040,16 @@ HTML_CONTENT = """<!DOCTYPE html>
             if (searchBar) {
                 searchBar.placeholder = lang === 'es' ? "Buscar por proceso, PID, IP, puerto..." : "Search by process, PID, IP, port...";
             }
+            const blockIpInput = document.getElementById('block_ip_input');
+            if (blockIpInput) {
+                blockIpInput.placeholder = lang === 'es' ? "Quick Block: IP a bloquear" : "Quick Block: IP to block";
+            }
+            const rbSrc = document.getElementById('rb_src_ip');
+            if (rbSrc) rbSrc.placeholder = lang === 'es' ? "Cualquiera" : "Any";
+            const rbDst = document.getElementById('rb_dst_ip');
+            if (rbDst) rbDst.placeholder = lang === 'es' ? "Cualquiera" : "Any";
+            const rbPort = document.getElementById('rb_port');
+            if (rbPort) rbPort.placeholder = lang === 'es' ? "Todos" : "All";
             
             // Re-label security toggle button text based on state and language
             const btn = document.getElementById('security_toggle_btn');
@@ -1971,7 +2168,7 @@ HTML_CONTENT = """<!DOCTYPE html>
             )) {
                 return;
             }
-            const lang = localStorage.getItem('language') || 'es';
+            const lang = localStorage.getItem('language') || 'en';
             const info = helpTranslations[lang][moduleKey];
             if (info) {
                 document.getElementById('help_title').innerText = info.title;
@@ -1996,13 +2193,18 @@ HTML_CONTENT = """<!DOCTYPE html>
                 }
             });
 
+            const sharedMonitoring = document.getElementById('shared_monitoring');
+
             if (path === '/firewall') {
                 document.getElementById('view_firewall').style.display = 'block';
+                if (sharedMonitoring) sharedMonitoring.style.display = 'block';
             } else if (path === '/configuration') {
                 document.getElementById('view_configuration').style.display = 'block';
+                if (sharedMonitoring) sharedMonitoring.style.display = 'none';
             } else {
                 // Default to dashboard
                 document.getElementById('view_dashboard').style.display = 'block';
+                if (sharedMonitoring) sharedMonitoring.style.display = 'block';
                 // Trigger resize for Echarts to render correctly if it was hidden
                 if (globeChart) globeChart.resize();
             }
@@ -2301,13 +2503,13 @@ LOGS_HTML_CONTENT = """<!DOCTYPE html>
             });
 
             if (filtered.length === 0) {
-                const lang = localStorage.getItem('language') || 'es';
+                const lang = localStorage.getItem('language') || 'en';
                 tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 40px 0;">${translations[lang]['no_logs']}</td></tr>`;
                 return;
             }
 
             tbody.innerHTML = filtered.map(log => {
-                const lang = localStorage.getItem('language') || 'es';
+                const lang = localStorage.getItem('language') || 'en';
                 const statusBadge = log.status === 'DETECTED' ? 'badge-detected' : 'badge-resolved';
                 const statusLabel = log.status === 'DETECTED' 
                     ? (lang === 'es' ? '⚠️ DETECTADO' : '⚠️ DETECTED') 
@@ -2376,7 +2578,7 @@ LOGS_HTML_CONTENT = """<!DOCTYPE html>
         }
 
         function applyLanguage() {
-            const lang = localStorage.getItem('language') || 'es';
+            const lang = localStorage.getItem('language') || 'en';
             document.querySelectorAll('[data-i18n]').forEach(el => {
                 const key = el.getAttribute('data-i18n');
                 if (translations[lang][key]) {
@@ -2626,6 +2828,9 @@ sudo crontab -l
 
 # Revisar servicios systemd recientemente modificados
 ls -lt /etc/systemd/system/ | head -n 10</div>
+
+                    <h3>🐙 Repositorio Oficial y GitHub</h3>
+                    <p>El código fuente completo y las instrucciones sumamente detalladas sobre <strong>cómo usar, configurar y probar el sistema</strong> (incluyendo la emulación de adversarios mediante playbooks, configuraciones del firewall y solución de problemas) están documentados en nuestro repositorio oficial de <strong>GitHub</strong>. Te recomendamos consultar el README principal y la wiki del proyecto para obtener un manual detallado paso a paso.</p>
                 `
             },
             en: {
@@ -2680,6 +2885,9 @@ sudo crontab -l
 
 # Check recently updated systemd services
 ls -lt /etc/systemd/system/ | head -n 10</div>
+
+                    <h3>🐙 Official Repository &amp; GitHub</h3>
+                    <p>The complete source code and highly detailed instructions on <strong>how to run, configure, and use the platform</strong> (including incident response playbooks for adversary emulation, firewall rules setup, and system diagnostics) are thoroughly documented in our official <strong>GitHub</strong> repository. Please refer to the main README and project wiki for a complete step-by-step user guide.</p>
                 `
             }
         };
@@ -2690,7 +2898,7 @@ ls -lt /etc/systemd/system/ | head -n 10</div>
         }
 
         function applyLanguage() {
-            const lang = localStorage.getItem('language') || 'es';
+            const lang = localStorage.getItem('language') || 'en';
             document.querySelectorAll('[data-i18n]').forEach(el => {
                 const key = el.getAttribute('data-i18n');
                 if (translations[lang][key]) {
@@ -2792,18 +3000,22 @@ def start_web_server(port=None):
                 self.end_headers()
                 self.wfile.write(json.dumps({"csrf_token": new_token}).encode('utf-8'))
             elif url.path == '/api/logs':
+                query_components = urllib.parse.parse_qs(url.query)
+                lang = query_components.get("lang", ["en"])[0]
                 self.send_response(200)
                 self.send_header('Content-type', 'application/json')
                 self._send_security_headers()
                 self.end_headers()
-                self.wfile.write(json.dumps(get_parsed_logs()).encode('utf-8'))
+                self.wfile.write(json.dumps(get_parsed_logs(lang=lang)).encode('utf-8'))
             elif url.path == '/api/data':
+                query_components = urllib.parse.parse_qs(url.query)
+                lang = query_components.get("lang", ["en"])[0]
                 self.send_response(200)
                 self.send_header('Content-type', 'application/json')
                 self._send_security_headers()
                 self.end_headers()
                 try:
-                    data = get_dashboard_data()
+                    data = get_dashboard_data(lang=lang)
                 except Exception as e:
                     data = {"error": str(e)}
                 self.wfile.write(json.dumps(data).encode('utf-8'))
@@ -3003,7 +3215,7 @@ def start_web_server(port=None):
                 self.end_headers()
 
     # Instantiate the server synchronously to catch bind errors (like port already in use)
-    _server = HTTPServer(('127.0.0.1', port), DashboardHandler)
+    _server = ThreadingHTTPServer(('127.0.0.1', port), DashboardHandler)
 
     def run_server():
         try:
@@ -3019,7 +3231,7 @@ def start_web_server(port=None):
     _sec_thread = threading.Thread(target=_security_worker, daemon=True)
     _sec_thread.start()
 
-def get_dashboard_data():
+def get_dashboard_data(lang="en"):
     """
     Aggregates stats, processes, connections, and security telemetry.
     """
@@ -3046,12 +3258,33 @@ def get_dashboard_data():
     # Use cached security report (updated every 5s in background thread)
     security_report = get_cached_security()
     
+    risk_level = security_report.get("risk_level", "BAJO")
+    if lang == "en":
+        risk_level_map = {
+            "CRÍTICO": "CRITICAL",
+            "ALTO": "HIGH",
+            "MEDIO": "MEDIUM",
+            "BAJO": "LOW",
+            "DESACTIVADO": "DISABLED"
+        }
+        risk_level = risk_level_map.get(risk_level, risk_level)
+
+    translated_findings = []
+    for f in security_report.get("findings", []):
+        f_copy = f.copy()
+        cat = f_copy.get("category", "")
+        desc = f_copy.get("description", "")
+        from core.interpreter import CATEGORY_TRANSLATIONS, translate_description
+        f_copy["category"] = CATEGORY_TRANSLATIONS.get(lang, {}).get(cat, cat)
+        f_copy["description"] = translate_description(desc, lang)
+        translated_findings.append(f_copy)
+
     # Active connections list
     raw_conns = get_all_connections()
     conns = []
     for c in raw_conns:
         # Generate rich human-readable description for each connection row
-        interpretation = interpret_connection(c)
+        interpretation = interpret_connection(c, lang=lang)
         c_copy = c.copy()
         c_copy["interpretation"] = interpretation
         conns.append(c_copy)
@@ -3075,19 +3308,42 @@ def get_dashboard_data():
     }
     
     scapy_metrics = get_live_metrics().copy()
+    
+    translated_dns_alerts = []
+    translated_dlp_alerts = []
     with _alerts_lock:
-        scapy_metrics["dns_alerts"] = list(_dns_alerts)
-        scapy_metrics["dlp_alerts"] = list(_dlp_alerts)
+        for alert in _dns_alerts:
+            a_copy = alert.copy()
+            cat = a_copy.get("category", "")
+            desc = a_copy.get("description", "")
+            from core.interpreter import CATEGORY_TRANSLATIONS, translate_description
+            a_copy["category"] = CATEGORY_TRANSLATIONS.get(lang, {}).get(cat, cat)
+            a_copy["description"] = translate_description(desc, lang)
+            translated_dns_alerts.append(a_copy)
+            
+        for alert in _dlp_alerts:
+            a_copy = alert.copy()
+            cat = a_copy.get("category", "")
+            desc = a_copy.get("description", "")
+            from core.interpreter import CATEGORY_TRANSLATIONS, translate_description
+            a_copy["category"] = CATEGORY_TRANSLATIONS.get(lang, {}).get(cat, cat)
+            a_copy["description"] = translate_description(desc, lang)
+            translated_dlp_alerts.append(a_copy)
+
+    scapy_metrics["dns_alerts"] = translated_dns_alerts
+    scapy_metrics["dlp_alerts"] = translated_dlp_alerts
 
     return {
         "cpu": stats.get("cpu", 0.0),
         "ram": stats.get("ram", 0.0),
+        "used_ram": stats.get("used_ram", 0),
+        "total_ram": stats.get("total_ram", 0),
         "rx_speed": round(rx_speed, 2),
         "tx_speed": round(tx_speed, 2),
         "security": {
             "score": security_report.get("score", 0),
-            "risk_level": security_report.get("risk_level", "BAJO"),
-            "findings": security_report.get("findings", []),
+            "risk_level": risk_level,
+            "findings": translated_findings,
             "scanned_processes": security_report.get("scanned_processes", 0),
             "scanned_connections": security_report.get("scanned_connections", 0)
         },

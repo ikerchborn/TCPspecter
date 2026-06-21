@@ -79,12 +79,13 @@ C2_PORTS = {
     5900, 5938                # VNC / RATs / AnyDesk
 }
 
-# Processes that naturally establish many outbound connections and should not trigger mass connection warnings
 WHITELISTED_MASS_CONN_PROCS = {
-    "firefox", "chrome", "brave", "chromium", "opera", "safari", 
+    "firefox", "firefox-esr", "firefox-bin", "chrome", "google-chrome", "chrome-sandbox", "brave", "brave-browser", 
+    "chromium", "chromium-browser", "opera", "safari", "msedge", "microsoft-edge", "vivaldi",
     "slack", "discord", "spotify", "thunderbird", "steam", "dropbox",
     "teams", "zoom", "vscode", "code", "curl", "wget", "git", "npm", 
-    "pip", "docker", "rustc", "cargo"
+    "pip", "docker", "rustc", "cargo", "go", "gopls", "rust-analyzer",
+    "language_server", "language-server", "pyright", "tsserver", "node", "nodejs"
 }
 
 # SUID binaries that are known to be safe or standard network/system tools
@@ -99,11 +100,11 @@ SUSPICIOUS_PATHS = [
 ]
 
 SUSPICIOUS_CMD_PATTERNS = [
-    r"bash\s+-i",
-    r"sh\s+-i",
-    r"nc\s+-[^\s]*e",
-    r"ncat\s+-[^\s]*e",
-    r"socat\s+",
+    r"\bbash\s+-i",
+    r"\bsh\s+-i",
+    r"\bnc\s+-[^\s]*e",
+    r"\bncat\s+-[^\s]*e",
+    r"\bsocat\s+",
     r"python.*import\s+pty",
     r"python.*pty\.spawn",
     r"/dev/tcp/",
@@ -381,7 +382,13 @@ def analyze_zombie_status(force=False) -> dict:
                     pass
             # --- 3b. Check for Fileless Malware (Anonymous Executable Memory) ---
             try:
-                JIT_RUNTIMES = {"python", "python3", "node", "java", "firefox", "chrome", "chromium", "brave", "code", "electron", "slack", "teams", "discord"}
+                JIT_RUNTIMES = {
+                    "python", "python3", "python3.11", "python3.12", "python3.13",
+                    "node", "nodejs", "java", "code", "electron", "slack", "teams", "discord", "spotify", "steam",
+                    "firefox", "firefox-esr", "firefox-bin", "chrome", "google-chrome", "chrome-sandbox", 
+                    "chromium", "chromium-browser", "brave", "brave-browser", "msedge", "microsoft-edge",
+                    "opera", "vivaldi"
+                }
                 if proc_name.lower() not in JIT_RUNTIMES:
                     anon_exec_regions = scan_anonymous_memory(pid)
                     
@@ -436,10 +443,10 @@ def analyze_zombie_status(force=False) -> dict:
                     conn.status == "ESTABLISHED" and conn.raddr and not is_private_ip(conn.raddr.ip)
                     for conn in conns
                 )
-                if has_external_established:
+                if has_external_established and proc_name.lower() not in {"python", "python3"}:
                     findings.append(_enrich_finding({
                         "category": "Shell con Conexión",
-                        "severity": "CRITICAL",
+                        "severity": "WARNING",
                         "description": f"Proceso intérprete de comandos ({proc_name}) con conexión TCP activa hacia IP pública.",
                         "pid": pid,
                         "proc_name": proc_name

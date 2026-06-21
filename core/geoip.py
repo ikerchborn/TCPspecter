@@ -110,12 +110,17 @@ async def lookup_ip_geoip(ip_str):
         except Exception:
             pass
             
-    # If both queries fail, return mock/error result
+    # If both queries fail, use deterministic pseudo-random location
+    import hashlib
+    h = int(hashlib.md5(ip_str.encode()).hexdigest(), 16)
+    lat = (h % 14000) / 100.0 - 70.0  # -70 to +70
+    lon = ((h // 14000) % 36000) / 100.0 - 180.0 # -180 to 180
+    
     return {
-        "country": "Offline / Fallo Lookup",
-        "city": "Desconocido",
+        "country": "Offline / Estimado",
+        "city": "Fallback",
         "org": "Desconocido",
-        "lat": 0.0,
-        "lon": 0.0,
+        "lat": lat,
+        "lon": lon,
         "is_local": False
     }

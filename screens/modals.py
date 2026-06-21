@@ -629,3 +629,146 @@ def draw_ascii_sparkline(history, width=50, height=4, color="#34d399") -> str:
     return "\n".join(lines)
 
 
+class ConfirmBlockModal(BaseAsciiModal):
+    """
+    ASCII confirmation modal to block an IP.
+    """
+    def __init__(self, ip: str):
+        super().__init__()
+        self.ip = ip
+
+    def compose(self):
+        body_text = (
+            "+-----------------------------------------------------+\n"
+            "|                  BLOQUEAR DIRECCION IP              |\n"
+            "+-----------------------------------------------------+\n"
+            f" ¿Seguro que deseas bloquear IP [{self.ip}]?\n"
+            " Se creará una regla DROP para el tráfico entrante.\n"
+            "\n"
+            " [ ENTER = Sí (Bloquear), ESC = Cancelar ]\n"
+            "+-----------------------------------------------------+"
+        )
+        yield Vertical(
+            Static(body_text, id="confirm_block_label"),
+            id="modal_dialog"
+        )
+
+    def on_key(self, event) -> None:
+        if event.key == "enter":
+            from core.firewall_manager import block_ip
+            success = block_ip(self.ip)
+            self.dismiss(success)
+        elif event.key == "escape":
+            self.dismiss(None)
+
+
+class FirewallModal(BaseAsciiModal):
+    """
+    ASCII modal displaying active firewall rules and allowing block/unblock.
+    """
+    def compose(self):
+        yield Vertical(
+            Static("", id="firewall_body"),
+            Input(placeholder="Escribe la IP a bloquear/desbloquear", id="firewall_input"),
+            Static(
+                " [ ENTER = Bloquear IP | U = Desbloquear IP | ESC = Cerrar ]\n"
+                "+----------------------------------------------------------------------+"
+            ),
+            id="modal_dialog_wide"
+        )
+
+    def on_mount(self) -> None:
+        self.refresh_rules()
+
+    def refresh_rules(self):
+        from core.firewall_manager import detect_backend, get_blocked_ips
+        backend = detect_backend()
+        blocked = get_blocked_ips()
+        
+        backend_label = backend.upper() if backend != "none" else "DESACTIVADO/NO DISPONIBLE"
+        
+        body_lines = [
+            "+----------------------------------------------------------------------+",
+            "|                     CONTROL DE CORTAFUEGOS (FIREWALL)                |",
+            "+----------------------------------------------------------------------+",
+            f" Backend detectado: [bold #F2E8C9]{backend_label}[/]",
+            "",
+            " Direcciones IP bloqueadas actualmente:",
+        ]
+        
+        if not blocked:
+            body_lines.append("  [green]✓ Ninguna IP bloqueada actualmente.[/]")
+        else:
+            for idx, b in enumerate(blocked, 1):
+                body_lines.append(f"  {idx}. [bold red]{b['ip']}[/] ({b['backend']} - {b['target']})")
+                
+        body_lines.append("")
+        body_lines.append(" Ingresa una IP en el campo inferior:")
+        body_lines.append("   - Presiona ENTER para BLOQUEAR")
+        body_lines.append("   - Presiona 'U' o 'u' para DESBLOQUEAR")
+        body_lines.append("+----------------------------------------------------------------------+")
+        
+        self.query_one("#firewall_body", Static).update("\n".join(body_lines))
+
+    def on_key(self, event) -> None:
+        if event.key == "escape":
+            self.dismiss(None)
+        elif event.key == "enter":
+            # Block IP typed in input
+            ip = self.query_one("#firewall_input", Input).value.strip()
+            if ip:
+                from core.firewall_manager import block_ip
+                block_ip(ip)
+                self.query_one("#firewall_input", Input).value = ""
+                self.refresh_rules()
+        elif event.key in ("u", "U"):
+            # Unblock IP typed in input
+            ip = self.query_one("#firewall_input", Input).value.strip()
+            if ip:
+                from core.firewall_manager import unblock_ip
+                unblock_ip(ip)
+                self.query_one("#firewall_input", Input).value = ""
+                self.refresh_rules()
+
+
+class ConfirmInstallSnortModal(BaseAsciiModal):
+    """
+    Doble confirmación para instalar Snort vía apt-get.
+    """
+    def compose(self):
+        from core.firewall_manager import detect_backend
+        fw = detect_backend()
+        fw_warning = ""
+        if fw != "none":
+            fw_warning = (
+                "|  ⚠️ ADVERTENCIA: Se ha detectado un Firewall activo   |\n"
+                f"|  ({fw.upper()}) en el sistema. La instalacion puede      |\n"
+                "|  interferir con la captura de paquetes.           |\n"
+                "+-----------------------------------------------------+\n"
+            )
+        
+        body_text = (
+            "+-----------------------------------------------------+\n"
+            "|               INSTALACION DE SNORT                  |\n"
+            "+-----------------------------------------------------+\n"
+            "| Se instalara Snort de forma no interactiva          |\n"
+            "| (apt-get install -y snort) y se configuraran        |\n"
+            "| las reglas locales de seguridad de TCPspecter.      |\n"
+            "+-----------------------------------------------------+\n"
+            f"{fw_warning}"
+            "| ¿Seguro que deseas proceder con la instalacion?     |\n"
+            "|                                                     |\n"
+            "| [ ENTER = Si, ESC = Cancelar ]                      |\n"
+            "+-----------------------------------------------------+"
+        )
+        yield Vertical(
+            Static(body_text, id="confirm_install_snort_label"),
+            id="modal_dialog_wide"
+        )
+
+    def on_key(self, event) -> None:
+        if event.key == "enter":
+            self.dismiss(True)
+        elif event.key == "escape":
+            self.dismiss(False)
+

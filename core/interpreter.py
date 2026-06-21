@@ -33,6 +33,8 @@ def interpret_connection(conn: dict) -> dict:
     pid = conn.get("pid", "-")
     name = conn.get("name", "-")
 
+    from core.geoip import is_private_ip
+
     # 1. IP Address Scope Interpretation
     is_local = False
     if raddr_ip in ("-", "*", "0.0.0.0", "::"):
@@ -44,12 +46,12 @@ def interpret_connection(conn: dict) -> dict:
     elif raddr_ip == "127.0.0.1" or raddr_ip == "::1":
         is_local = True
         ip_desc = "Comunicación Interna (Loopback): Tráfico local que nunca sale de tu computadora."
-    elif raddr_ip.startswith("10.") or raddr_ip.startswith("192.168.") or raddr_ip.startswith("172."):
+    elif is_private_ip(raddr_ip):
         is_local = True
-        ip_desc = "Red Local (LAN): Conexión directa a otro dispositivo dentro de tu red interna/privada."
-    elif raddr_ip.startswith("169.254."):
-        is_local = True
-        ip_desc = "Dirección IP de Enlace Local (Autoconfigurada, sin salida a Internet)."
+        if raddr_ip.startswith("169.254."):
+            ip_desc = "Dirección IP de Enlace Local (Autoconfigurada, sin salida a Internet)."
+        else:
+            ip_desc = "Red Local (LAN): Conexión directa a otro dispositivo dentro de tu red interna/privada."
     else:
         ip_desc = f"IP Pública (Internet): El proceso está enviando o recibiendo datos desde servidores externos."
 
@@ -104,7 +106,8 @@ def interpret_connection(conn: dict) -> dict:
         else:
             try:
                 rport_val = int(raddr_port)
-                if rport_val in (4444, 5555, 3333, 14444):
+                from core.zombie_detector import C2_PORTS
+                if rport_val in C2_PORTS:
                     assessment = "CRÍTICO (C2/MINERÍA)"
                     reasons.append(f"Conexión activa al puerto {rport_val}, comúnmente usado por troyanos de control (C2) o mineros de criptomonedas.")
                     recommendations = [

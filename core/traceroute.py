@@ -15,6 +15,10 @@ async def get_hops(ip_str):
     if not ip_str or ip_str == "-" or ip_str == "0.0.0.0" or ip_str == "127.0.0.1":
         return []
 
+    global traceroute_cache
+    if len(traceroute_cache) > 1000:
+        traceroute_cache.clear()
+
     if ip_str in traceroute_cache:
         return traceroute_cache[ip_str]
 

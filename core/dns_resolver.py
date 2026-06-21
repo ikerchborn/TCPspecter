@@ -25,6 +25,9 @@ class DNSResolver:
         if not ip or ip in ("-", "*", "0.0.0.0", "::"):
             return ip
         
+        if len(self.cache) > 5000:
+            self.cache.clear()
+
         # Check cache
         if ip in self.cache:
             return self.cache[ip]

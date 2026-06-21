@@ -4,7 +4,14 @@ import json
 import time
 import urllib.parse
 import asyncio
+import secrets
+import socket
 from http.server import HTTPServer, BaseHTTPRequestHandler
+import os
+import re
+import datetime
+import logging
+from collections import defaultdict
 
 import psutil
 from core.sysinfo import get_system_stats, get_process_list, get_all_connections
@@ -12,18 +19,99 @@ from core.zombie_detector import analyze_zombie_status
 from core.interpreter import interpret_connection
 from core.geoip import lookup_ip_geoip, lookup_self_geoip
 from core.traceroute import get_hops
+from core.alerts import SecurityAlert, publish as _publish_alert, subscribe as _subscribe_alert
 
-import os
-import re
-import datetime
+log = logging.getLogger(__name__)
+
+_BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CONFIG_PATH = os.path.join(_BASE_DIR, "config.json")
+SECURITY_LOG_FILE = os.path.join(_BASE_DIR, "security_events.log")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CSRF Token Store (in-memory, 30-minute TTL)
+# ─────────────────────────────────────────────────────────────────────────────
+_csrf_tokens: dict[str, float] = {}   # token -> expiry timestamp
+_csrf_lock = threading.Lock()
+_CSRF_TTL_SECS = 1800  # 30 minutes
+
+def generate_csrf_token() -> str:
+    """Generates a cryptographically secure CSRF token and registers it."""
+    token = secrets.token_hex(32)
+    now = time.time()
+    with _csrf_lock:
+        # Purge expired tokens
+        expired = [t for t, exp in _csrf_tokens.items() if now > exp]
+        for t in expired:
+            del _csrf_tokens[t]
+        _csrf_tokens[token] = now + _CSRF_TTL_SECS
+    return token
+
+def validate_csrf_token(token: str) -> bool:
+    """Validates a CSRF token. Tokens are single-use after validation."""
+    if not token:
+        return False
+    with _csrf_lock:
+        expiry = _csrf_tokens.get(token)
+        if expiry and time.time() < expiry:
+            # Single-use: remove after validation
+            del _csrf_tokens[token]
+            return True
+    return False
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Rate Limiter — Sliding window per client IP
+# ─────────────────────────────────────────────────────────────────────────────
+_rate_limit_store: dict[str, list] = defaultdict(list)  # ip -> [timestamps]
+_rate_lock = threading.Lock()
+_RATE_WINDOW_SECS = 60   # 1-minute window
+_RATE_MAX_REQUESTS = 30  # max 30 mutating requests per minute per IP
+
+def check_rate_limit(client_ip: str) -> bool:
+    """Returns True if the client is within the rate limit, False if exceeded."""
+    now = time.time()
+    with _rate_lock:
+        timestamps = _rate_limit_store[client_ip]
+        # Keep only events in the current window
+        _rate_limit_store[client_ip] = [t for t in timestamps if now - t < _RATE_WINDOW_SECS]
+        if len(_rate_limit_store[client_ip]) >= _RATE_MAX_REQUESTS:
+            return False
+        _rate_limit_store[client_ip].append(now)
+        return True
 
 def get_configured_port():
     try:
-        with open("config.json", "r") as f:
+        with open(CONFIG_PATH, "r") as f:
             cfg = json.load(f)
             return int(cfg.get("web_server_port", 8050))
     except Exception:
         return 8050
+
+
+_dns_alerts = []
+_dlp_alerts = []
+_alerts_lock = threading.Lock()
+
+def _alert_callback(alert: SecurityAlert) -> None:
+    global _dns_alerts, _dlp_alerts
+    with _alerts_lock:
+        alert_dict = {
+            "timestamp": alert.timestamp,
+            "category": alert.category,
+            "description": alert.description,
+            "severity": alert.severity,
+            "source_ip": alert.source_ip,
+            "dest_ip": alert.dest_ip
+        }
+        if alert.engine == "dns":
+            _dns_alerts.append(alert_dict)
+            if len(_dns_alerts) > 100:
+                _dns_alerts.pop(0)
+        elif alert.engine == "dlp":
+            _dlp_alerts.append(alert_dict)
+            if len(_dlp_alerts) > 100:
+                _dlp_alerts.pop(0)
+
+_subscribe_alert(_alert_callback)
 
 PORT = get_configured_port()
 
@@ -32,53 +120,60 @@ _server = None
 _thread = None
 last_net_io = None
 last_net_time = 0.0
-
-# --- Security report cache & logging -------------------------------------
-SECURITY_LOG_FILE = "security_events.log"
 _active_findings = set()
 
-def log_security_finding(finding, status="DETECTED"):
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    pid_str = f"PID {finding.get('pid') or '-'}"
-    proc_str = finding.get('proc_name') or 'N/A'
-    log_line = f"[{timestamp}] [{status}] [{finding.get('severity', 'INFO')}] [{finding.get('category', 'General')}] ({pid_str}: {proc_str}) - {finding.get('description', '')}\n"
-    
-    # Rotate log file if it exceeds 2MB (approx 15,000 log entries) to cap disk usage
-    try:
-        if os.path.exists(SECURITY_LOG_FILE) and os.path.getsize(SECURITY_LOG_FILE) > 2 * 1024 * 1024:
-            old_file = SECURITY_LOG_FILE + ".old"
-            if os.path.exists(old_file):
-                os.remove(old_file)
-            os.rename(SECURITY_LOG_FILE, old_file)
-    except Exception:
-        pass
+def log_security_finding(finding: dict, status: str = "DETECTED") -> None:
+    """
+    Shim de compatibilidad: convierte el dict de finding legacy al
+    nuevo SecurityAlert y lo publica en el Alert Bus.
 
-    try:
-        with open(SECURITY_LOG_FILE, "a") as f:
-            f.write(log_line)
-    except Exception:
-        pass
+    El Alert Bus se encarga de la persistencia en disco (text log + ECS JSON).
+    Esta función ya NO escribe directamente al disco — elimina la duplicación
+    y el riesgo de 'except Exception: pass' silencioso en I/O.
+    """
+    _publish_alert(SecurityAlert.now(
+        engine=finding.get("proc_name", "system") or "system",
+        category=finding.get("category", "General"),
+        severity=finding.get("severity", "INFO"),  # type: ignore[arg-type]
+        description=finding.get("description", ""),
+        pid=finding.get("pid") if isinstance(finding.get("pid"), int) else None,
+        proc_name=finding.get("proc_name") or "",
+        status=status,  # type: ignore[arg-type]
+        mitre_technique_id=finding.get("mitre_technique_id"),
+        mitre_technique_name=finding.get("mitre_technique_name"),
+        mitre_tactic=finding.get("mitre_tactic"),
+        nist_controls=tuple(finding.get("nist_controls") or ()),
+        iso_controls=tuple(finding.get("iso_controls") or ()),
+    ))
 
-def get_parsed_logs():
+def get_parsed_logs() -> list[dict]:
+    """
+    Lee y parsea el archivo de log de texto de eventos de seguridad.
+    Retorna los eventos más recientes primero.
+    """
     logs = []
+    log_path = os.path.join(_BASE_DIR, "security_events.log")
+    if not os.path.exists(log_path):
+        return logs
     try:
-        if os.path.exists(SECURITY_LOG_FILE):
-            with open(SECURITY_LOG_FILE, "r") as f:
-                for line in f:
-                    # [2026-06-20 21:06:37] [DETECTED] [CRITICAL] [Category] (PID 1234: proc) - Desc
-                    m = re.match(r"^\[(.*?)\]\s+\[(.*?)\]\s+\[(.*?)\]\s+\[(.*?)\]\s+\(PID (.*?):\s+(.*?)\)\s+-\s+(.*)$", line.strip())
-                    if m:
-                        logs.append({
-                            "timestamp": m.group(1),
-                            "status": m.group(2),
-                            "severity": m.group(3),
-                            "category": m.group(4),
-                            "pid": m.group(5),
-                            "proc_name": m.group(6),
-                            "description": m.group(7)
-                        })
-    except Exception:
-        pass
+        with open(log_path, "r", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                m = re.match(
+                    r"^\[(.*?)\]\s+\[(.*?)\]\s+\[(.*?)\]\s+\[(.*?)\]\s+\(PID (.*?):\s+(.*?)\)\s+-\s+(.*)$",
+                    line.strip(),
+                )
+                if m:
+                    logs.append({
+                        "timestamp": m.group(1),
+                        "status":    m.group(2),
+                        "severity":  m.group(3),
+                        "category":  m.group(4),
+                        "pid":       m.group(5),
+                        "proc_name": m.group(6),
+                        "description": m.group(7),
+                    })
+    except OSError as exc:
+        log.error("Error leyendo security_events.log: %s", exc)
     return list(reversed(logs))
 
 _cached_security = {
@@ -90,39 +185,45 @@ _cached_security = {
 }
 _security_lock = threading.Lock()
 
-def _security_worker():
-    """Background thread: refresh security analysis every 5 seconds & log events."""
-    global _cached_security, _active_findings
+def _security_worker() -> None:
+    """Background thread: refresca el análisis de seguridad cada 5s y publica eventos nuevos."""
+    global _active_findings
     while True:
         try:
             result = analyze_zombie_status()
             with _security_lock:
                 _cached_security = result
-            
-            # Keep history logs of changes in findings
+
             current_findings = result.get("findings", [])
-            current_keys = set()
+            current_keys: set[tuple] = set()
+
             for f in current_findings:
-                key = (f.get("category"), f.get("severity"), f.get("pid"), f.get("proc_name"), f.get("description"))
+                key = (
+                    f.get("category"), f.get("severity"),
+                    f.get("pid"),      f.get("proc_name"),
+                    f.get("description"),
+                )
                 current_keys.add(key)
                 if key not in _active_findings:
                     log_security_finding(f, "DETECTED")
                     _active_findings.add(key)
-            
-            # Check resolved
-            resolved_keys = _active_findings - current_keys
-            for key in list(resolved_keys):
-                f = {
-                    "category": key[0],
-                    "severity": key[1],
-                    "pid": key[2],
-                    "proc_name": key[3],
-                    "description": key[4]
-                }
-                log_security_finding(f, "RESOLVED")
-                _active_findings.remove(key)
+
+            # Findings que ya no existen → RESOLVED
+            for key in list(_active_findings - current_keys):
+                log_security_finding({
+                    "category":    key[0],
+                    "severity":    key[1],
+                    "pid":         key[2],
+                    "proc_name":   key[3],
+                    "description": key[4],
+                }, "RESOLVED")
+                _active_findings.discard(key)
+
+        except psutil.AccessDenied:
+            pass  # esperado sin root — no loguear para no saturar
         except Exception:
-            pass
+            log.exception("Error inesperado en _security_worker.")
+
         time.sleep(5)
 
 def get_cached_security():
@@ -247,11 +348,13 @@ HTML_CONTENT = """<!DOCTYPE html>
             padding: 20px;
             box-shadow: 0 10px 30px var(--shadow);
             transition: transform 0.3s ease, box-shadow 0.3s ease;
+            cursor: pointer;
         }
 
         .card:hover {
             transform: translateY(-2px);
             box-shadow: 0 15px 35px rgba(0, 0, 0, 0.6);
+            border-color: rgba(74, 122, 157, 0.4);
         }
 
         .card-title {
@@ -632,7 +735,7 @@ HTML_CONTENT = """<!DOCTYPE html>
     <!-- Main Grid Dashboard -->
     <div class="dashboard-grid">
         <!-- Security Widget Card -->
-        <div class="card grid-span-2">
+        <div class="card grid-span-2" onclick="showModuleHelp('security', event)">
             <div class="card-title" data-i18n="sec_analysis">Análisis de Seguridad de Red (C2 / Máquina Zombie)</div>
             <div class="security-score-container">
                 <div class="score-circle" id="risk_gradient">
@@ -659,7 +762,7 @@ HTML_CONTENT = """<!DOCTYPE html>
         </div>
 
         <!-- System Stats Pie Chart -->
-        <div class="card">
+        <div class="card" onclick="showModuleHelp('proto', event)">
             <div class="card-title" data-i18n="chart_proto_dist">Distribución de Protocolos</div>
             <div class="chart-container">
                 <canvas id="protoChart"></canvas>
@@ -667,7 +770,7 @@ HTML_CONTENT = """<!DOCTYPE html>
         </div>
 
         <!-- Top CPU Processes Chart -->
-        <div class="card">
+        <div class="card" onclick="showModuleHelp('cpu', event)">
             <div class="card-title" data-i18n="chart_top_cpu">Top Procesos CPU (%)</div>
             <div class="chart-container">
                 <canvas id="procChart"></canvas>
@@ -675,15 +778,21 @@ HTML_CONTENT = """<!DOCTYPE html>
         </div>
     </div>
 
-    <!-- Bandwidth History Chart & Security Alerts List -->
-    <div class="dashboard-grid" style="grid-template-columns: 2fr 1fr; margin-bottom: 24px;">
-        <div class="card">
+    <!-- Bandwidth History Chart, Entropy Chart & Security Alerts List -->
+    <div class="dashboard-grid" style="grid-template-columns: 1.5fr 1.5fr 1fr; margin-bottom: 24px;">
+        <div class="card" onclick="showModuleHelp('bandwidth', event)">
             <div class="card-title" data-i18n="chart_bandwidth">Tráfico de Red Histórico (Mbps)</div>
             <div class="chart-container-large">
                 <canvas id="bandwidthChart"></canvas>
             </div>
         </div>
-        <div class="card" style="display: flex; flex-direction: column;">
+        <div class="card" onclick="showModuleHelp('entropy', event)">
+            <div class="card-title">Entropía de Payload Histórica</div>
+            <div class="chart-container-large">
+                <canvas id="entropyChart"></canvas>
+            </div>
+        </div>
+        <div class="card" style="display: flex; flex-direction: column;" onclick="showModuleHelp('alerts', event)">
             <div class="card-title" data-i18n="sec_alerts_active">Alertas C2 / Comportamientos Zombie</div>
             <div style="flex: 1; overflow-y: auto; max-height: 220px;" id="alerts_list">
                 <div style="color: var(--text-muted); font-style: italic; text-align: center; margin-top: 40px;" data-i18n="no_alerts">No se han detectado alertas de seguridad activas.</div>
@@ -691,8 +800,75 @@ HTML_CONTENT = """<!DOCTYPE html>
         </div>
     </div>
 
+    <!-- Firewall & Snort Control Panel -->
+    <div class="dashboard-grid" style="grid-template-columns: 1fr 1fr; margin-bottom: 24px;">
+        <div class="card" onclick="showModuleHelp('ids_fw', event)">
+            <div class="card-title">
+                <span>IDS Snort & Firewall</span>
+                <span id="snort_badge" class="severity-badge sev-bajo">Cargando...</span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 14px;">
+                <div style="display: flex; gap: 12px; align-items: center; justify-content: space-between;">
+                    <div>
+                        <strong style="font-size: 15px;">Servicio Snort (IDS):</strong>
+                        <div id="snort_info" style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Detectando estado...</div>
+                    </div>
+                    <div style="display: flex; gap: 8px;">
+                        <button id="install_snort_btn" onclick="installSnort()" style="display: none; background: rgba(74, 122, 157, 0.15); border: 1px solid var(--primary); color: var(--text-main); padding: 6px 12px; border-radius: 8px; font-size: 12px; cursor: pointer; font-weight: 600;">Instalar Snort</button>
+                        <button id="toggle_snort_btn" onclick="toggleSnort()" style="background: rgba(255,255,255,0.05); border: 1px solid var(--card-border); color: var(--text-main); padding: 6px 12px; border-radius: 8px; font-size: 12px; cursor: pointer; font-weight: 600;">Iniciar/Detener</button>
+                    </div>
+                </div>
+                <hr style="border: 0; border-top: 1px solid var(--card-border);">
+                <div>
+                    <strong style="font-size: 14px; display: block; margin-bottom: 8px;">Reglas Cortafuegos Activas:</strong>
+                    <div class="table-container" style="max-height: 140px;">
+                        <table style="font-size: 12px;">
+                            <thead>
+                                <tr style="background: #0d131f;">
+                                    <th style="padding: 8px 10px;">IP Bloqueada</th>
+                                    <th style="padding: 8px 10px;">Backend</th>
+                                    <th style="padding: 8px 10px;">Target</th>
+                                    <th style="padding: 8px 10px;">Acción</th>
+                                </tr>
+                            </thead>
+                            <tbody id="firewall_tbody">
+                                <tr>
+                                    <td colspan="4" style="text-align: center; color: var(--text-muted); padding: 10px 0;">Cargando reglas...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div style="display: flex; gap: 8px; margin-top: 4px;">
+                    <input type="text" id="block_ip_input" placeholder="IP a bloquear" style="flex: 1; background: rgba(17, 24, 39, 0.8); border: 1px solid var(--card-border); border-radius: 8px; padding: 6px 12px; color: var(--text-main); outline: none; font-size: 12px;">
+                    <button onclick="blockIP()" style="background: rgba(248, 113, 113, 0.15); border: 1px solid var(--danger); color: var(--danger); padding: 6px 12px; border-radius: 8px; font-size: 12px; cursor: pointer; font-weight: 600;">Bloquear IP</button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card" style="display: flex; flex-direction: column;" onclick="showModuleHelp('dlp_ndr', event)">
+            <div class="card-title">DNS Tunneling & Heurísticas de Tráfico</div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 12px;">
+                <div style="background: rgba(255,255,255,0.01); border: 1px solid var(--card-border); border-radius: 10px; padding: 10px; text-align: center;">
+                    <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">Paquetes Sniffeados</div>
+                    <div id="scapy_packet_count" style="font-size: 20px; font-weight: 700; color: var(--primary); margin-top: 4px;">0</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.01); border: 1px solid var(--card-border); border-radius: 10px; padding: 10px; text-align: center;">
+                    <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">Entropía de Payload</div>
+                    <div id="scapy_avg_entropy" style="font-size: 20px; font-weight: 700; color: var(--accent); margin-top: 4px;">0.00</div>
+                </div>
+            </div>
+            <div style="flex: 1; overflow-y: auto; max-height: 180px;">
+                <strong style="font-size: 13px; color: var(--text-muted); display: block; margin-bottom: 8px; text-transform: uppercase;">Alertas de Tráfico / DNS / DLP:</strong>
+                <div id="dns_dlp_alerts" style="display: flex; flex-direction: column; gap: 8px;">
+                    <div style="color: var(--text-muted); font-style: italic; text-align: center; margin-top: 20px; font-size: 12px;">No hay alertas en tiempo real de Scapy/DNS.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Cyber-Node Global Map Section -->
-    <div class="card" style="margin-bottom: 24px;">
+    <div class="card" style="margin-bottom: 24px;" onclick="showModuleHelp('map', event)">
         <div class="connections-header" style="margin-bottom: 0;">
             <div class="connections-title">
                 <h2>Mapa Global de Conexiones</h2>
@@ -703,7 +879,7 @@ HTML_CONTENT = """<!DOCTYPE html>
     </div>
 
     <!-- Active Connections Table Section -->
-    <div class="card">
+    <div class="card" onclick="showModuleHelp('connections', event)">
         <div class="connections-header">
             <div class="connections-title">
                 <h2>Conexiones del Sistema Activas</h2>
@@ -782,8 +958,10 @@ HTML_CONTENT = """<!DOCTYPE html>
         let protoChart = null;
         let procChart = null;
         let bandwidthChart = null;
+        let entropyChart = null;
         let globeChart = null;
         let bandwidthData = { rx: [], tx: [], labels: [] };
+        let entropyHistoryData = { labels: [], values: [] };
         let allConnections = [];
         let geoIpCache = {}; // ip -> geo data or 'fetching' or 'local'
         let tracerouteCache = {}; // ip -> array of IPs or 'fetching'
@@ -949,12 +1127,45 @@ HTML_CONTENT = """<!DOCTYPE html>
                     }
                 }
             });
+
+            // Entropy Chart
+            const ctxEnt = document.getElementById('entropyChart').getContext('2d');
+            entropyChart = new Chart(ctxEnt, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Entropía Promedio',
+                        data: [],
+                        borderColor: '#fbbf24',
+                        backgroundColor: 'rgba(251, 191, 36, 0.05)',
+                        fill: true,
+                        tension: 0.4,
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: { grid: { color: 'rgba(255,255,255,0.03)' }, ticks: { color: '#888888' } },
+                        y: { min: 0, max: 8, grid: { color: 'rgba(255,255,255,0.03)' }, ticks: { color: '#888888' } }
+                    },
+                    plugins: {
+                        legend: { labels: { color: '#9ca3af' } }
+                    }
+                }
+            });
         }
+
+
+        let currentFirewallBackend = 'none';
 
         async function refreshData() {
             try {
                 const response = await fetch('/api/data');
                 const data = await response.json();
+                currentFirewallBackend = data.firewall.backend;
 
                 // 1. Update Security Panel
                 document.getElementById('risk_score').innerText = data.security.score;
@@ -1052,6 +1263,105 @@ HTML_CONTENT = """<!DOCTYPE html>
                 bandwidthChart.data.datasets[0].data = bandwidthData.rx;
                 bandwidthChart.data.datasets[1].data = bandwidthData.tx;
                 bandwidthChart.update();
+
+                // Entropy History Chart
+                entropyHistoryData.labels.push(timeStr);
+                entropyHistoryData.values.push(data.scapy.avg_entropy);
+                if (entropyHistoryData.labels.length > 15) {
+                    entropyHistoryData.labels.shift();
+                    entropyHistoryData.values.shift();
+                }
+                entropyChart.data.labels = entropyHistoryData.labels;
+                entropyChart.data.datasets[0].data = entropyHistoryData.values;
+                entropyChart.update();
+
+                // Snort Status Update
+                const snortBadge = document.getElementById('snort_badge');
+                const snortInfo = document.getElementById('snort_info');
+                const toggleSnortBtn = document.getElementById('toggle_snort_btn');
+                const installBtn = document.getElementById('install_snort_btn');
+                
+                if (!data.snort.installed) {
+                    snortBadge.innerText = 'NO INSTALADO';
+                    snortBadge.className = 'severity-badge sev-alto';
+                    snortInfo.innerText = 'Snort IDS no está instalado en el sistema.';
+                    installBtn.style.display = 'inline-block';
+                    toggleSnortBtn.style.display = 'none';
+                } else {
+                    installBtn.style.display = 'none';
+                    toggleSnortBtn.style.display = 'inline-block';
+                    if (data.snort.running) {
+                        snortBadge.innerText = 'ACTIVO';
+                        snortBadge.className = 'severity-badge sev-bajo';
+                        snortInfo.innerText = 'Snort está ejecutándose en modo pasivo IDS.';
+                        toggleSnortBtn.innerText = 'Detener Snort';
+                        toggleSnortBtn.style.background = 'rgba(248, 113, 113, 0.1)';
+                        toggleSnortBtn.style.borderColor = 'var(--danger)';
+                        toggleSnortBtn.style.color = 'var(--danger)';
+                    } else {
+                        snortBadge.innerText = 'INACTIVO';
+                        snortBadge.className = 'severity-badge sev-medio';
+                        snortInfo.innerText = 'El servicio Snort está detenido.';
+                        toggleSnortBtn.innerText = 'Iniciar Snort';
+                        toggleSnortBtn.style.background = 'rgba(52, 211, 153, 0.1)';
+                        toggleSnortBtn.style.borderColor = 'var(--success)';
+                        toggleSnortBtn.style.color = 'var(--success)';
+                    }
+                }
+
+                // Firewall blocked rules table update
+                const fwTbody = document.getElementById('firewall_tbody');
+                if (data.firewall.blocked_ips.length === 0) {
+                    fwTbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--text-muted); padding: 10px 0;">Ninguna IP bloqueada actualmente.</td></tr>`;
+                } else {
+                    fwTbody.innerHTML = data.firewall.blocked_ips.map(rule => {
+                        return `
+                            <tr>
+                                <td style="padding: 6px 10px; font-weight: 600; color: var(--danger);">${rule.ip}</td>
+                                <td style="padding: 6px 10px;">${rule.backend}</td>
+                                <td style="padding: 6px 10px;">${rule.target}</td>
+                                <td style="padding: 6px 10px;">
+                                    <button onclick="unblockIP('${rule.ip}')" style="background: rgba(52, 211, 153, 0.1); border: 1px solid var(--success); color: var(--success); padding: 2px 6px; border-radius: 4px; font-size: 10px; cursor: pointer;">Desbloquear</button>
+                                </td>
+                            </tr>
+                        `;
+                    }).join('');
+                }
+
+                // Scapy Metrics and Alerts
+                document.getElementById('scapy_packet_count').innerText = data.scapy.stats.packet_count;
+                document.getElementById('scapy_avg_entropy').innerText = data.scapy.avg_entropy.toFixed(2);
+                
+                const dnsDlpAlerts = document.getElementById('dns_dlp_alerts');
+                const combinedAlerts = [...data.scapy.dns_alerts, ...data.scapy.dlp_alerts];
+                
+                combinedAlerts.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+                
+                if (combinedAlerts.length === 0) {
+                    dnsDlpAlerts.innerHTML = `<div style="color: var(--text-muted); font-style: italic; text-align: center; margin-top: 20px; font-size: 12px;">No hay alertas en tiempo real de Scapy/DNS.</div>`;
+                } else {
+                    dnsDlpAlerts.innerHTML = combinedAlerts.map(alert => {
+                        let color = '#fbbf24'; 
+                        let typeLabel = alert.category || 'ALERTA';
+                        
+                        if (typeLabel.includes('TÚNEL') || typeLabel.includes('ENTROPÍA') || typeLabel.includes('Reverse Shell')) {
+                            color = '#f87171';
+                        }
+                        
+                        const desc = alert.description;
+                        const queryInfo = alert.query ? ` [Query: ${alert.query}]` : '';
+                        
+                        return `
+                            <div style="background: rgba(255,255,255,0.02); padding: 8px; border-radius: 6px; border-left: 3px solid ${color}; font-size: 11px;">
+                                <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
+                                    <span style="color: ${color}; font-weight: 600; text-transform: uppercase;">${typeLabel}</span>
+                                    <span style="color: var(--text-muted);">${alert.timestamp}</span>
+                                </div>
+                                <div style="color: var(--text-main); font-size: 12px;">${desc}${queryInfo}</div>
+                            </div>
+                        `;
+                    }).join('');
+                }
 
                 // 4. Update Connections Table
                 allConnections = data.connections;
@@ -1297,6 +1607,88 @@ HTML_CONTENT = """<!DOCTYPE html>
             }
         }
 
+        async function installSnort() {
+            let warnMsg = '¿Estás seguro de que deseas instalar Snort? Se realizará de forma no interactiva (apt-get install -y snort).';
+            if (currentFirewallBackend !== 'none') {
+                warnMsg = '⚠️ ADVERTENCIA: Se ha detectado un Firewall activo (' + currentFirewallBackend.toUpperCase() + ') en el sistema. La instalación de Snort puede interferir con la captura de paquetes o requerir reglas adicionales de filtrado para no bloquear tráfico legítimo.\\n\\n' + warnMsg;
+            }
+            if (!confirm(warnMsg)) {
+                return;
+            }
+            const btn = document.getElementById('install_snort_btn');
+            btn.innerText = 'Instalando...';
+            btn.disabled = true;
+            try {
+                const res = await fetch('/api/install_snort', { method: 'POST' });
+                const data = await res.json();
+                alert(data.message);
+            } catch(e) {
+                alert('Error al instalar Snort: ' + e);
+            } finally {
+                refreshData();
+            }
+        }
+
+        async function toggleSnort() {
+            try {
+                const res = await fetch('/api/toggle_snort', { method: 'POST' });
+                const data = await res.json();
+                if (!data.success) {
+                    alert('Operación fallida. Asegúrate de ejecutar tcpspecter con privilegios de root/sudo.');
+                }
+            } catch(e) {
+                alert('Error al alternar Snort: ' + e);
+            } finally {
+                refreshData();
+            }
+        }
+
+        async function blockIP(ip) {
+            const ipToBlock = ip || document.getElementById('block_ip_input').value.trim();
+            if (!ipToBlock) return;
+            
+            if (!confirm(`¿Bloquear tráfico de la IP ${ipToBlock}?`)) return;
+            
+            try {
+                const res = await fetch('/api/block_ip', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ip: ipToBlock })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    if (!ip) document.getElementById('block_ip_input').value = '';
+                } else {
+                    alert('Error al bloquear la IP. ¿Tienes permisos sudo?');
+                }
+            } catch(e) {
+                alert('Error: ' + e);
+            } finally {
+                refreshData();
+            }
+        }
+
+        async function unblockIP(ip) {
+            if (!ip) return;
+            if (!confirm(`¿Desbloquear tráfico de la IP ${ip}?`)) return;
+            
+            try {
+                const res = await fetch('/api/unblock_ip', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ip: ip })
+                });
+                const data = await res.json();
+                if (!data.success) {
+                    alert('Error al desbloquear la IP. ¿Tienes permisos sudo?');
+                }
+            } catch(e) {
+                alert('Error: ' + e);
+            } finally {
+                refreshData();
+            }
+        }
+
         const translations = {
             es: {
                 subtitle: "Network Security Analytics — DLP + NDR + NTA + Engine de Explicación",
@@ -1372,6 +1764,120 @@ HTML_CONTENT = """<!DOCTYPE html>
             });
         }
 
+
+        const helpTranslations = {
+            es: {
+                security: {
+                    title: "Análisis de Seguridad (C2 / Zombie)",
+                    desc: "Este panel muestra el cálculo del puntaje de riesgo del host basado en heurísticas del Zombie Detector. Evalúa patrones de beaconing C2, conexiones reversas de shell activas, binarios ejecutándose desde archivos eliminados del disco, binarios SUID con actividad de red y ejecutables ubicados en rutas volátiles como /tmp."
+                },
+                proto: {
+                    title: "Distribución de Protocolos",
+                    desc: "Este gráfico muestra la distribución de sockets de red abiertos en tu máquina. Clasifica en conexiones TCP activas, UDP de datagramas y puertos LISTEN que están a la escucha de nuevas conexiones entrantes."
+                },
+                cpu: {
+                    title: "Top Procesos por CPU",
+                    desc: "Muestra en tiempo real los procesos del sistema operativo que están consumiendo mayor porcentaje de CPU, permitiendo identificar picos de carga o hilos de malware de minería (cryptominers) en ejecución."
+                },
+                bandwidth: {
+                    title: "Tráfico de Red Histórico",
+                    desc: "Mide y grafica la velocidad de entrada (RX) y salida (TX) de paquetes en Mbps en todas tus interfaces de red. Útil para capturar picos de exfiltración o de tráfico inusual."
+                },
+                entropy: {
+                    title: "Entropía de Payload Histórica",
+                    desc: "Gráfico de la entropía de Shannon promedio detectada en las cargas de red TCP. Valores altos (> 7.3) sugieren que se están enviando datos cifrados o archivos altamente comprimidos, lo cual podría indicar canales cifrados C2 o exfiltración encubierta de backups."
+                },
+                alerts: {
+                    title: "Alertas C2 / Comportamientos Zombie",
+                    desc: "Registra incidentes graves detectados por el motor heurístico local. Ejemplos incluyen llamadas a Reverse Shell, masquarading de procesos (ejecutables con nombres comunes corriendo desde rutas no estándar) y persistencia del sistema."
+                },
+                ids_fw: {
+                    title: "IDS Snort & Firewall",
+                    desc: "Permite gestionar el cortafuegos local (iptables/ufw) e iniciar/detener el servicio pasivo de detección de intrusos Snort. Puedes ver la lista de IPs bloqueadas y agregar nuevas reglas de bloqueo o aislamiento."
+                },
+                dlp_ndr: {
+                    title: "Alertas DLP & NDR (Scapy/DNS)",
+                    desc: "Muestra alertas en tiempo real extraídas por el sniffer de red de Scapy y DNS: detección de exfiltración de archivos críticos por firmas de Magic Bytes (DLP), consultas de dominios aleatorios (DGA) y túneles DNS en el puerto 53."
+                },
+                map: {
+                    title: "Mapa Global de Conexiones",
+                    desc: "Visualiza geográficamente las direcciones IP públicas de tus sockets activos. Utiliza el módulo Traceroute asíncrono para mapear los saltos intermedios en un globo interactivo Apache ECharts."
+                },
+                connections: {
+                    title: "Conexiones del Sistema Activas",
+                    desc: "Tabla interactiva de flujos y sockets de red en tiempo real. Al hacer clic en cualquier fila, el Explanation Engine de TCPspecter traduce las variables de red (como puertos conocidos, DNS o ASN) a descripciones comprensibles para humanos."
+                }
+            },
+            en: {
+                security: {
+                    title: "Security Analysis (C2 / Botnet)",
+                    desc: "This card shows the heuristic risk score calculated by the Zombie Detector. It monitors active reverse shells, process name masquerading, execution from deleted binaries, SUID binaries communicating over the network, and scripts running from volatile paths like /tmp."
+                },
+                proto: {
+                    title: "Protocol Distribution",
+                    desc: "Displays the relative percentage of open sockets categorized into active TCP connections, UDP datagrams, and LISTEN ports waiting for inbound traffic."
+                },
+                cpu: {
+                    title: "Top CPU Processes",
+                    desc: "Shows running system processes that consume the highest amount of processor resources, helpful for pinpointing system spikes or silent mining malware."
+                },
+                bandwidth: {
+                    title: "Historical Network Traffic",
+                    desc: "Graphs the inbound (RX) and outbound (TX) transfer rates in Mbps across all system network interfaces to help you detect network exfiltration spikes."
+                },
+                entropy: {
+                    title: "Historical Payload Entropy",
+                    desc: "Tracks the average Shannon entropy of TCP packet payloads. High values (> 7.3) signify encrypted channels (like AES) or compressed files, which are common signatures of C2 channels or database exfiltration."
+                },
+                alerts: {
+                    title: "C2 Alerts / Zombie Behaviors",
+                    desc: "Lists critical security events captured by the host heuristics agent, such as reverse shell calls, process masquerading, system persistence setups, and orphaned C2 processes."
+                },
+                ids_fw: {
+                    title: "IDS Snort & Firewall",
+                    desc: "Provides centralized firewall control (iptables/ufw) and lifecycle management of the Snort Intrusion Detection System. Allows you to block suspect IPs and manage quarantine rules."
+                },
+                dlp_ndr: {
+                    title: "DLP & NDR Alerts (Scapy/DNS)",
+                    desc: "Real-time network alerts processed by the passive sniffer: Data Loss Prevention (DLP) magic byte detection, Domain Generation Algorithms (DGA), and DNS Tunneling exfiltration over port 53."
+                },
+                map: {
+                    title: "Global Connection Map",
+                    desc: "Geographically visualizes public IP addresses of active connections. Uses asynchronous traceroute routines to plot network hops on an interactive Apache ECharts globe."
+                },
+                connections: {
+                    title: "Active Network Connections",
+                    desc: "Real-time interactive sockets table. Clicking any row triggers TCPspecter's Explanation Engine to translate network attributes (such as ports, DNS, and ASN) into plain human-readable text."
+                }
+            }
+        };
+
+        function showModuleHelp(moduleKey, event) {
+            // Prevent triggering modal when clicking interactive controls (buttons, links, inputs, canvas)
+            if (event && (
+                event.target.tagName === 'BUTTON' || 
+                event.target.tagName === 'A' || 
+                event.target.tagName === 'INPUT' || 
+                event.target.tagName === 'CANVAS' ||
+                event.target.closest('button') ||
+                event.target.closest('a') ||
+                event.target.closest('input')
+            )) {
+                return;
+            }
+            const lang = localStorage.getItem('language') || 'es';
+            const info = helpTranslations[lang][moduleKey];
+            if (info) {
+                document.getElementById('help_title').innerText = info.title;
+                document.getElementById('help_desc').innerHTML = info.desc;
+                document.getElementById('help_modal').style.display = 'flex';
+            }
+        }
+
+        function closeHelpModal() {
+            document.getElementById('help_modal').style.display = 'none';
+        }
+
         window.onload = () => {
             initCharts();
             initGlobe();
@@ -1380,6 +1886,18 @@ HTML_CONTENT = """<!DOCTYPE html>
             setInterval(refreshData, 1500);
         };
     </script>
+
+    <!-- Interactive Explanation Modal Overlay -->
+    <div id="help_modal" onclick="if(event.target===this) closeHelpModal()" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.75); backdrop-filter: blur(6px); z-index: 10000; align-items: center; justify-content: center;">
+        <div style="background: #0f172a; border: 1px solid var(--primary); padding: 24px; border-radius: 16px; max-width: 500px; width: 90%; position: relative; box-shadow: 0 20px 50px rgba(0,0,0,0.5);">
+            <button onclick="closeHelpModal()" style="position: absolute; top: 12px; right: 12px; background: none; border: none; color: var(--text-muted); font-size: 20px; cursor: pointer; font-weight: bold; line-height: 1;">&times;</button>
+            <h3 id="help_title" style="color: var(--primary); margin-top: 0; margin-bottom: 12px; font-size: 16px; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px;">Módulo</h3>
+            <p id="help_desc" style="color: var(--text-main); font-size: 13px; line-height: 1.6; margin-bottom: 20px; text-align: justify;">Explicación del módulo.</p>
+            <div style="text-align: right;">
+                <button onclick="closeHelpModal()" style="background: var(--primary); border: none; color: #fff; padding: 6px 16px; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer;">Entendido</button>
+            </div>
+        </div>
+    </div>
 </body>
 </html>
 """
@@ -2084,31 +2602,75 @@ def start_web_server(port=None):
         def log_message(self, format, *args):
             pass # suppress requests console clutter
 
+        def _send_security_headers(self):
+            """Adds HTTP security headers to every response."""
+            # Prevent clickjacking
+            self.send_header('X-Frame-Options', 'DENY')
+            # Prevent MIME sniffing
+            self.send_header('X-Content-Type-Options', 'nosniff')
+            # XSS protection (legacy browsers)
+            self.send_header('X-XSS-Protection', '1; mode=block')
+            # Content Security Policy — only allow inline scripts (dashboard uses them)
+            self.send_header(
+                'Content-Security-Policy',
+                "default-src 'self'; "
+                "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
+                "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com; "
+                "font-src 'self' https://fonts.gstatic.com; "
+                "img-src 'self' data: https:; "
+                "connect-src 'self' https://cdn.jsdelivr.net"
+            )
+            # HSTS: only via HTTPS, but set as best practice
+            self.send_header('Referrer-Policy', 'strict-origin-when-cross-origin')
+            # Restrict browser features
+            self.send_header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
+
+        def _get_client_ip(self) -> str:
+            """Returns the client IP for rate limiting."""
+            return self.client_address[0] if self.client_address else "unknown"
+
         def do_GET(self):
             url = urllib.parse.urlparse(self.path)
             if url.path == '/':
+                csrf_token = generate_csrf_token()
                 self.send_response(200)
                 self.send_header('Content-type', 'text/html; charset=utf-8')
+                # Embed CSRF token as a cookie (HttpOnly=False so JS can read it for AJAX headers)
+                self.send_header('Set-Cookie', f'csrf_token={csrf_token}; Path=/; SameSite=Strict')
+                self._send_security_headers()
                 self.end_headers()
                 self.wfile.write(HTML_CONTENT.encode('utf-8'))
             elif url.path == '/logs':
                 self.send_response(200)
                 self.send_header('Content-type', 'text/html; charset=utf-8')
+                self._send_security_headers()
                 self.end_headers()
                 self.wfile.write(LOGS_HTML_CONTENT.encode('utf-8'))
             elif url.path == '/tutorial':
                 self.send_response(200)
                 self.send_header('Content-type', 'text/html; charset=utf-8')
+                self._send_security_headers()
                 self.end_headers()
                 self.wfile.write(TUTORIAL_HTML_CONTENT.encode('utf-8'))
+            elif url.path == '/api/csrf_token':
+                # Endpoint to refresh CSRF token via AJAX
+                new_token = generate_csrf_token()
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Set-Cookie', f'csrf_token={new_token}; Path=/; SameSite=Strict')
+                self._send_security_headers()
+                self.end_headers()
+                self.wfile.write(json.dumps({"csrf_token": new_token}).encode('utf-8'))
             elif url.path == '/api/logs':
                 self.send_response(200)
                 self.send_header('Content-type', 'application/json')
+                self._send_security_headers()
                 self.end_headers()
                 self.wfile.write(json.dumps(get_parsed_logs()).encode('utf-8'))
             elif url.path == '/api/data':
                 self.send_response(200)
                 self.send_header('Content-type', 'application/json')
+                self._send_security_headers()
                 self.end_headers()
                 try:
                     data = get_dashboard_data()
@@ -2124,6 +2686,7 @@ def start_web_server(port=None):
                     res = None
                 self.send_response(200)
                 self.send_header('Content-type', 'application/json')
+                self._send_security_headers()
                 self.end_headers()
                 self.wfile.write(json.dumps(res).encode('utf-8'))
             elif url.path == '/api/self_geo':
@@ -2133,6 +2696,7 @@ def start_web_server(port=None):
                     res = None
                 self.send_response(200)
                 self.send_header('Content-type', 'application/json')
+                self._send_security_headers()
                 self.end_headers()
                 self.wfile.write(json.dumps(res).encode('utf-8'))
             elif url.path == '/api/traceroute':
@@ -2144,29 +2708,155 @@ def start_web_server(port=None):
                     res = []
                 self.send_response(200)
                 self.send_header('Content-type', 'application/json')
+                self._send_security_headers()
                 self.end_headers()
                 self.wfile.write(json.dumps(res).encode('utf-8'))
             else:
                 self.send_response(404)
+                self._send_security_headers()
                 self.end_headers()
 
         def do_POST(self):
             url = urllib.parse.urlparse(self.path)
+            client_ip = self._get_client_ip()
+
+            # ── Rate Limiting ─────────────────────────────────────────────
+            if not check_rate_limit(client_ip):
+                self.send_response(429)  # Too Many Requests
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Retry-After', '60')
+                self._send_security_headers()
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "error": "Rate limit exceeded. Max 30 mutating requests per minute."
+                }).encode('utf-8'))
+                return
+
+            content_length = int(self.headers.get('Content-Length', 0))
+            if content_length > 65536:  # Cap body at 64KB
+                self.send_response(413)
+                self.send_header('Content-type', 'application/json')
+                self._send_security_headers()
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": "Request body too large"}).encode('utf-8'))
+                return
+
+            post_data = self.rfile.read(content_length).decode('utf-8') if content_length > 0 else ""
+            
+            body = {}
+            if post_data:
+                try:
+                    body = json.loads(post_data)
+                except Exception:
+                    try:
+                        body = {k: v[0] for k, v in urllib.parse.parse_qs(post_data).items()}
+                    except Exception:
+                        pass
+
+            # ── CSRF Validation ───────────────────────────────────────────
+            # Skip CSRF check for read-only toggle_security (non-destructive)
+            CSRF_EXEMPT_PATHS = {'/api/toggle_security'}
+            if url.path not in CSRF_EXEMPT_PATHS:
+                # Accept token from header (X-CSRF-Token) or body
+                csrf_token = (
+                    self.headers.get('X-CSRF-Token') or
+                    body.get('csrf_token') or
+                    urllib.parse.parse_qs(url.query).get('csrf_token', [''])[0]
+                )
+                if not validate_csrf_token(csrf_token):
+                    self.send_response(403)  # Forbidden
+                    self.send_header('Content-type', 'application/json')
+                    self._send_security_headers()
+                    self.end_headers()
+                    self.wfile.write(json.dumps({
+                        "error": "Invalid or missing CSRF token. Refresh the dashboard page."
+                    }).encode('utf-8'))
+                    return
+
             if url.path == '/api/toggle_security':
                 from core import zombie_detector
                 zombie_detector.ADVANCED_SECURITY_ENABLED = not zombie_detector.ADVANCED_SECURITY_ENABLED
                 self.send_response(200)
                 self.send_header('Content-type', 'application/json')
+                self._send_security_headers()
                 self.end_headers()
                 self.wfile.write(json.dumps({"enabled": zombie_detector.ADVANCED_SECURITY_ENABLED}).encode('utf-8'))
+                
+            elif url.path == '/api/block_ip':
+                ip = body.get("ip")
+                if not ip:
+                    query_components = urllib.parse.parse_qs(url.query)
+                    ip = query_components.get("ip", [""])[0]
+                
+                from core.firewall_manager import block_ip, validate_ip
+                safe_ip = validate_ip(ip) if ip else None
+                success = block_ip(safe_ip) if safe_ip else False
+                
+                self.send_response(200 if success else 400)
+                self.send_header('Content-type', 'application/json')
+                self._send_security_headers()
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "success": success,
+                    "ip": safe_ip or ip,
+                    "error": None if success else "Invalid IP or firewall operation failed"
+                }).encode('utf-8'))
+
+            elif url.path == '/api/unblock_ip':
+                ip = body.get("ip")
+                if not ip:
+                    query_components = urllib.parse.parse_qs(url.query)
+                    ip = query_components.get("ip", [""])[0]
+                
+                from core.firewall_manager import unblock_ip, validate_ip
+                safe_ip = validate_ip(ip) if ip else None
+                success = unblock_ip(safe_ip) if safe_ip else False
+                
+                self.send_response(200 if success else 400)
+                self.send_header('Content-type', 'application/json')
+                self._send_security_headers()
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "success": success,
+                    "ip": safe_ip or ip,
+                    "error": None if success else "Invalid IP or firewall operation failed"
+                }).encode('utf-8'))
+
+            elif url.path == '/api/toggle_snort':
+                from core.snort_manager import is_snort_running, start_snort, stop_snort
+                if is_snort_running():
+                    success = stop_snort()
+                    status = "stopped"
+                else:
+                    success = start_snort()
+                    status = "started"
+                
+                self.send_response(200 if success else 500)
+                self.send_header('Content-type', 'application/json')
+                self._send_security_headers()
+                self.end_headers()
+                self.wfile.write(json.dumps({"success": success, "status": status}).encode('utf-8'))
+
+            elif url.path == '/api/install_snort':
+                from core.snort_manager import install_snort
+                success, msg = install_snort()
+                
+                self.send_response(200 if success else 500)
+                self.send_header('Content-type', 'application/json')
+                self._send_security_headers()
+                self.end_headers()
+                self.wfile.write(json.dumps({"success": success, "message": msg}).encode('utf-8'))
+                
             else:
                 self.send_response(404)
+                self._send_security_headers()
                 self.end_headers()
 
+    # Instantiate the server synchronously to catch bind errors (like port already in use)
+    _server = HTTPServer(('127.0.0.1', port), DashboardHandler)
+
     def run_server():
-        global _server
         try:
-            _server = HTTPServer(('127.0.0.1', port), DashboardHandler)
             _server.serve_forever()
         except Exception:
             pass
@@ -2219,6 +2909,26 @@ def get_dashboard_data():
     # Processes list
     processes = get_process_list()
 
+    # Dynamic updates from Snort, Firewall, and Scapy Sniffer
+    from core.snort_manager import is_snort_running, is_snort_installed
+    from core.firewall_manager import get_blocked_ips, detect_backend
+    from core.traffic_analyzer import get_live_metrics
+    
+    snort_status = {
+        "installed": is_snort_installed(),
+        "running": is_snort_running()
+    }
+    
+    firewall_status = {
+        "backend": detect_backend(),
+        "blocked_ips": get_blocked_ips()
+    }
+    
+    scapy_metrics = get_live_metrics().copy()
+    with _alerts_lock:
+        scapy_metrics["dns_alerts"] = list(_dns_alerts)
+        scapy_metrics["dlp_alerts"] = list(_dlp_alerts)
+
     return {
         "cpu": stats.get("cpu", 0.0),
         "ram": stats.get("ram", 0.0),
@@ -2232,5 +2942,8 @@ def get_dashboard_data():
             "scanned_connections": security_report.get("scanned_connections", 0)
         },
         "processes": processes,
-        "connections": conns
+        "connections": conns,
+        "snort": snort_status,
+        "firewall": firewall_status,
+        "scapy": scapy_metrics
     }

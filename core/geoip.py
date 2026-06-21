@@ -50,6 +50,10 @@ async def lookup_ip_geoip(ip_str):
     if not ip_str or ip_str == "-":
         return None
         
+    global geoip_cache
+    if len(geoip_cache) > 2000:
+        geoip_cache.clear()
+        
     if ip_str in geoip_cache:
         return geoip_cache[ip_str]
         

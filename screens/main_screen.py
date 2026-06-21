@@ -25,7 +25,8 @@ from core.report_exporter import export_report
 from screens.modals import (
     ConfirmKillModal, LocalAnalysisModal,
     VirusTotalAnalysisModal, ExportReportModal,
-    ZombieAnalysisModal
+    ZombieAnalysisModal, ConfirmBlockModal, FirewallModal,
+    ConfirmInstallSnortModal
 )
 from widgets.analytics_panels import ExplanationPanel
 from core import zombie_detector
@@ -58,6 +59,9 @@ class MainScreen(Screen):
         ("shift+g",     "open_graphics",     "Gráficos (Browser)"),
         ("i",           "show_interpretation", "Interpretar"),
         ("S",           "toggle_security",   "On/Off Analítica"),
+        ("f",           "firewall_modal",     "Cortafuegos"),
+        ("t",           "toggle_snort",      "On/Off Snort"),
+        ("b",           "block_ip",          "Bloquear IP"),
         ("escape",      "dismiss_modal",     "Cancelar"),
         ("q",           "quit",              "Salir"),
     ]
@@ -174,8 +178,19 @@ class MainScreen(Screen):
         try:
             from core.web_server import start_web_server
             start_web_server(port=PORT)
-        except Exception:
-            pass
+        except Exception as e:
+            self.notify(
+                f"[!] Servidor web no disponible en puerto {PORT}: {e}",
+                severity="error",
+                timeout=6.0
+            )
+
+        # Start Scapy Traffic Analyzer
+        try:
+            from core.traffic_analyzer import start_analyzer
+            start_analyzer()
+        except Exception as e:
+            self.notify(f"[!] No se pudo iniciar el analizador Scapy: {e}", severity="warning")
 
         # Focus the connection table on startup
         self.query_one("#connection_table").focus()
@@ -238,6 +253,30 @@ class MainScreen(Screen):
 
         # 7. Update security status in the background
         self.update_c2_security_async()
+
+        # 8. Update firewall and snort status bar text
+        try:
+            from core import zombie_detector
+            from core.snort_manager import is_snort_running
+            from core.firewall_manager import get_blocked_ips
+            
+            snort_status = "[bold #34d399]SNORT ACTIVO[/]" if is_snort_running() else "[#888888]SNORT INACTIVO[/]"
+            blocked_count = len(get_blocked_ips())
+            fw_status = f"[bold red]FW: {blocked_count} IPs[/]" if blocked_count > 0 else "[#888888]FW LIMPIO[/]"
+            
+            status_bar = self.query_one("#security_status_bar", Static)
+            if zombie_detector.ADVANCED_SECURITY_ENABLED:
+                status_bar.update(
+                    f"[#34d399]●[/] SEGURIDAD: [bold #34d399]ACTIVA[/] | {snort_status} | {fw_status}   "
+                    "[#888888]f=Cortafuegos  t=Snort  b=Bloquear IP  S=Analítica  z=Zombie  i=Interpretar  x=Kill[/]"
+                )
+            else:
+                status_bar.update(
+                    f"[#888888]○[/] SEGURIDAD: [bold #888888]DESACTIVADA[/] | {snort_status} | {fw_status}   "
+                    "[#888888]f=Cortafuegos  t=Snort  b=Bloquear IP  S=Analítica  z=Zombie  i=Interpretar  x=Kill[/]"
+                )
+        except Exception:
+            pass
 
     # ──────────────────────────────────────────────────────────────────────────
     # Connection refresh
@@ -588,7 +627,6 @@ class MainScreen(Screen):
         self.app.push_screen(ExportReportModal(), handle_export)
 
     def action_zombie_check(self) -> None:
-        print("[DEBUG] action_zombie_check triggered!")
         self.app.push_screen(ZombieAnalysisModal())
 
     def action_clear_selection(self) -> None:
@@ -735,3 +773,82 @@ class MainScreen(Screen):
                 
         from screens.modals import InterpretationModal
         self.app.push_screen(InterpretationModal(conn_data, proc_data))
+
+    def action_firewall_modal(self) -> None:
+        self.app.push_screen(FirewallModal())
+
+    def action_toggle_snort(self) -> None:
+        from core.snort_manager import is_snort_installed, is_snort_running, start_snort, stop_snort
+        
+        if not is_snort_installed():
+            def check_install(do_install: bool | None) -> None:
+                if do_install:
+                    self.notify("Iniciando instalacion de Snort...", severity="information")
+                    self.run_install_worker()
+            self.app.push_screen(ConfirmInstallSnortModal(), check_install)
+            return
+            
+        if is_snort_running():
+            if stop_snort():
+                self.notify("Snort detenido.", severity="information")
+            else:
+                self.notify("Error al detener Snort.", severity="error")
+        else:
+            if start_snort():
+                self.notify("Snort iniciado.", severity="information")
+            else:
+                self.notify("Error al iniciar Snort. ¿Tienes privilegios sudo/root?", severity="error")
+        self.update_tick()
+
+    @work(exclusive=True)
+    async def run_install_worker(self) -> None:
+        from core.snort_manager import install_snort
+        import asyncio
+        loop = asyncio.get_running_loop()
+        success, msg = await loop.run_in_executor(None, install_snort)
+        if success:
+            self.notify("Snort instalado y configurado con éxito.", severity="information")
+        else:
+            self.notify(f"Instalacion fallida: {msg}", severity="error")
+        self.update_tick()
+
+    def action_block_ip(self) -> None:
+        focused = self.focused
+        ct = self.query_one("#connection_table", ConnectionTable)
+        ip_to_block = None
+        
+        if focused == ct and ct.cursor_row is not None:
+            try:
+                row_key = ct.coordinate_to_cell_key((ct.cursor_row, 0)).row_key
+                parts = row_key.value.split("_")
+                if len(parts) >= 5:
+                    ip_to_block = parts[4]
+            except Exception:
+                pass
+
+        if not ip_to_block or ip_to_block in ("-", "*", "127.0.0.1", "::1", "0.0.0.0"):
+            self.notify("Ninguna IP externa seleccionada para bloquear.", severity="warning")
+            return
+
+        def handle_block_result(success):
+            if success:
+                self.notify(f"IP {ip_to_block} bloqueada en cortafuegos.", severity="information")
+                self.update_tick()
+            elif success is False:
+                self.notify(f"Error al bloquear IP {ip_to_block}.", severity="error")
+
+        self.app.push_screen(ConfirmBlockModal(ip_to_block), handle_block_result)
+
+    def action_quit(self) -> None:
+        try:
+            from core.traffic_analyzer import stop_analyzer
+            stop_analyzer()
+        except Exception:
+            pass
+        try:
+            from core.snort_manager import stop_snort
+            stop_snort()
+        except Exception:
+            pass
+        self.app.exit()
+

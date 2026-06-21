@@ -1,3 +1,4 @@
 {
-  "virustotal_api_key": "YOUR_VIRUSTOTAL_API_KEY_HERE"
+  "virustotal_api_key": "YOUR_VIRUSTOTAL_API_KEY_HERE",
+  "web_server_port": 8050
 }

@@ -50,30 +50,21 @@ def _process_alert(alert: SecurityAlert) -> None:
     payload = alert.to_ecs()
     payload_bytes = json.dumps(payload).encode('utf-8')
 
-    # Phase 3: Webhooks (SOAR Dispatcher)
+    # Phase 3: Webhooks (SOAR Dispatcher) - Delegated to alerts.py
     if not webhook_url:
         try:
             with open(WEBHOOK_DEBUG_FILE, "a") as f:
                 f.write(json.dumps(payload) + "\n")
         except Exception:
             pass
-    else:
-        signature = hmac.new(
-            webhook_secret.encode('utf-8'),
-            payload_bytes,
-            hashlib.sha256
-        ).hexdigest()
-
-        try:
-            req = urllib.request.Request(webhook_url, data=payload_bytes, method='POST')
-            req.add_header('Content-Type', 'application/json')
-            req.add_header('X-TCPspecter-Signature', signature)
-            urllib.request.urlopen(req, timeout=5.0)
-        except Exception as e:
-            log.error(f"Failed to dispatch webhook: {e}")
 
     # Phase 4: Aislamiento y Tecnología de Engaño
-    if alert.severity == "CRITICAL" and alert.category in ("C2 Beaconing", "Memoria Fileless", "Zombie"):
+    # Fix B-2: Match exact categories from zombie_detector.py
+    critical_categories = (
+        "C2 Beaconing", "Fileless Memory", "Orphan C2 Agent", 
+        "Suspicious C2 Port", "System Persistence", "Reverse Shell", "Firma de Shell", "Shell with Connection"
+    )
+    if alert.severity == "CRITICAL" and alert.category in critical_categories:
         if active_response:
             from core.firewall_manager import quarantine_host
             success = quarantine_host(admin_ips=admin_ips)
@@ -82,13 +73,15 @@ def _process_alert(alert: SecurityAlert) -> None:
                 log.info(f"Active Response triggered: Host isolated due to {alert.category}")
                 publish_alert(SecurityAlert.now(
                     engine="response",
-                    category="Aislamiento Dinámico",
+                    category="Dynamic Isolation",
                     severity="CRITICAL",
-                    description=f"Host aislado automáticamente por alerta de {alert.category}.",
+                    description=f"Host automatically isolated due to {alert.category}. Mechanism: SOAR engine triggered iptables quarantine chain based on cumulative heuristic scoring threshold (>= 60 pts).",
                     compliance_tags=("NIST-IR-8011", "ISO-27001-A.13.1")
                 ))
     
-    if alert.category == "Escaneo de Puertos" or alert.category == "Escaneo de Red":
+    # Check for English and Spanish categories from Snort
+    tarpit_categories = ("Port Scan", "Network Scan", "Escaneo de Puertos", "Escaneo de Red")
+    if alert.category in tarpit_categories:
         from core.firewall_manager import enable_tarpit
         if alert.source_ip:
             success = enable_tarpit(attacker_ip=alert.source_ip, tarpit_port=int(tarpit_port))
@@ -97,9 +90,9 @@ def _process_alert(alert: SecurityAlert) -> None:
                 log.info(f"Tarpit triggered: {alert.source_ip} redirected to port {tarpit_port}")
                 publish_alert(SecurityAlert.now(
                     engine="response",
-                    category="Bloqueo de Firewall",
+                    category="Firewall Block / Tarpit",
                     severity="HIGH",
-                    description=f"Escaneo masivo detectado desde {alert.source_ip}. Tráfico redirigido al Tarpit en puerto {tarpit_port}.",
+                    description=f"Massive scan detected from {alert.source_ip}. Mechanism: Snort IDS detected >15 rapid SYN attempts. Traffic has been redirected via iptables PREROUTING to local Tarpit on port {tarpit_port} to exhaust attacker resources.",
                     source_ip=alert.source_ip,
                     compliance_tags=("NIST-IR-8011", "ISO-27001-A.13.1")
                 ))

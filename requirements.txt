@@ -3,3 +3,8 @@ psutil==5.9.8
 httpx==0.27.0
 scapy
 
+
+fastapi
+uvicorn
+websockets
+pydantic

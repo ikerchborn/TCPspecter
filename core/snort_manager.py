@@ -1,9 +1,9 @@
 # core/snort_manager.py
 """
-Gestión del ciclo de vida del proceso Snort (IDS).
+Manages the Snort IDS process lifecycle.
 
-Responsabilidad ÚNICA: controlar el proceso Snort y parsear sus alertas.
-Publica en el Alert Bus. No importa web_server ni sabe nada de la UI.
+Single responsibility: control the Snort process and parse its alerts.
+Publishes to the Alert Bus. Does not import web_server and has no UI knowledge.
 
 Fixes aplicados vs versión anterior:
 - Eliminada importación circular (from core.web_server import log_security_finding)
@@ -34,7 +34,7 @@ from core.alerts import SecurityAlert, publish
 
 log = logging.getLogger(__name__)
 
-# ─── Constantes ──────────────────────────────────────────────────────────────
+# ─── Constants ───────────────────────────────────────────────────────────────
 
 _SNORT_PATHS: Final[tuple[str, ...]] = (
     "/usr/sbin/snort",
@@ -50,14 +50,14 @@ _SNORT_LOG_CANDIDATES: Final[tuple[Path, ...]] = (
 _RULES_DIR  = Path("/etc/snort/rules")
 _RULES_FILE = _RULES_DIR / "local.rules"
 
-# ─── Reglas Snort mejoradas ───────────────────────────────────────────────────
+# ─── Improved Snort Rules ────────────────────────────────────────────────────
 # Usan variables $HOME_NET/$EXTERNAL_NET (definidas en snort.conf) y
 # content matching donde aplica — mucho más precisas que "alert tcp any any".
 
 _LOCAL_RULES: Final[str] = """\
-# TCPspecter — Reglas IDS Locales (Modo Pasivo / Alert Only)
-# Generadas automáticamente. Editar con cuidado.
-# Para desactivar una regla, comenta la línea con #.
+# TCPspecter — Local IDS Rules (Passive Mode / Alert Only)
+# Auto-generated. Edit with care.
+# To disable a rule, comment the line with #.
 
 # ── C2 / Reverse Shells ──────────────────────────────────────────────────────
 alert tcp $HOME_NET any -> $EXTERNAL_NET 4444 \\
@@ -162,7 +162,7 @@ def _find_snort_binary() -> str | None:
 
 
 def is_snort_installed() -> bool:
-    """Retorna True si Snort está disponible en el sistema."""
+    """Returns True if Snort is available on the system."""
     return _find_snort_binary() is not None
 
 
@@ -204,14 +204,19 @@ def setup_local_rules(overwrite: bool = False) -> bool:
             log.info("Reglas previas respaldadas en: %s", bak)
 
         _RULES_FILE.write_text(_LOCAL_RULES, encoding="utf-8")
-        log.info("Reglas TCPspecter escritas en: %s", _RULES_FILE)
+        log.info("TCPspecter rules written to: %s", _RULES_FILE)
+        
+        # Ensure it's included in snort.conf
+        snort_conf = Path("/etc/snort/snort.conf")
+        if snort_conf.exists():
+            conf_content = snort_conf.read_text()
+            if "include $RULE_PATH/local.rules" not in conf_content:
+                with snort_conf.open("a") as f:
+                    f.write("\n# TCPspecter injection\ninclude $RULE_PATH/local.rules\n")
         return True
 
     except PermissionError:
-        log.error(
-            "Sin permisos para escribir en %s — ¿ejecutando como root?",
-            _RULES_DIR,
-        )
+        log.error("Permission denied writing to %s — run as root?", _RULES_DIR)
         return False
     except OSError as exc:
         log.error("Error de I/O al escribir reglas Snort: %s", exc)
@@ -230,6 +235,10 @@ def install_snort() -> tuple[bool, str]:
 
     if is_snort_installed():
         return True, "Snort ya está instalado."
+
+    import shutil
+    if not shutil.which("apt-get"):
+        return False, "Autoinstalación fallida: Sólo soportamos sistemas basados en Debian/Ubuntu (apt). Instala Snort manualmente usando tu gestor de paquetes (yum, dnf, pacman)."
 
     log.info("Iniciando instalación de Snort via apt-get...")
     env = {**os.environ, "DEBIAN_FRONTEND": "noninteractive"}
@@ -276,7 +285,7 @@ def install_snort() -> tuple[bool, str]:
     return True, "Snort instalado y reglas TCPspecter configuradas exitosamente."
 
 
-# ─── Control de proceso ───────────────────────────────────────────────────────
+# ─── Process Control ────────────────────────────────────────────────────────
 
 def is_snort_running() -> bool:
     """
@@ -318,7 +327,7 @@ def start_snort() -> bool:
     global _process, _log_thread
 
     if not is_snort_installed():
-        log.error("Snort no instalado. Usa install_snort() primero.")
+        log.error("Snort not installed. Call install_snort() first.")
         return False
 
     if is_snort_running():
@@ -357,12 +366,15 @@ def start_snort() -> bool:
     with _state_lock:
         try:
             _stop_event.clear()
+            
+            # Prevent pipe buffer deadlock by redirecting to a file
+            err_log = open("/var/log/snort/tcpspecter_error.log", "a")
             _process = subprocess.Popen(
                 cmd,
-                stdout=subprocess.DEVNULL,  # usamos el archivo de log, no stdout
-                stderr=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=err_log,
             )
-            log.info("Snort iniciado como subprocess (PID %d) en %s.", _process.pid, iface)
+            log.info("Snort started as subprocess (PID %d) on %s.", _process.pid, iface)
             _start_log_tailer()
             return True
         except PermissionError:
@@ -411,7 +423,7 @@ def stop_snort() -> bool:
     return True
 
 
-# ─── Tailer de logs ───────────────────────────────────────────────────────────
+# ─── Log Tailer ─────────────────────────────────────────────────────────────
 
 def _start_log_tailer() -> None:
     """Inicia el hilo lector de alertas en background."""

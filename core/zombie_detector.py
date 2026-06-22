@@ -16,58 +16,58 @@ ADVANCED_SECURITY_ENABLED = True
 # Reference: https://attack.mitre.org/
 # ─────────────────────────────────────────────────────────────────────────────
 MITRE_MAP = {
-    "Binario Eliminado":      {"id": "T1070.004", "name": "File Deletion",                     "tactic": "Defense Evasion"},
-    "Ruta Sospechosa":        {"id": "T1059",     "name": "Command and Scripting Interpreter",  "tactic": "Execution"},
-    "SUID con Red":           {"id": "T1548.001", "name": "Setuid and Setgid",                  "tactic": "Privilege Escalation"},
-    "Firma de Shell":         {"id": "T1059.004", "name": "Unix Shell",                         "tactic": "Execution"},
-    "Shell con Conexión":     {"id": "T1059.004", "name": "Unix Shell",                         "tactic": "Execution"},
-    "Mascarada de Proceso":   {"id": "T1036.005", "name": "Match Legitimate Name or Location",  "tactic": "Defense Evasion"},
-    "Agente C2 Huérfano":     {"id": "T1543",     "name": "Create or Modify System Process",    "tactic": "Persistence"},
-    "Tráfico SSL Atípico":    {"id": "T1071.001", "name": "Web Protocols (C2 over HTTPS)",      "tactic": "Command and Control"},
-    "Puerto C2/Sospechoso":   {"id": "T1071",     "name": "Application Layer Protocol",         "tactic": "Command and Control"},
-    "Escucha Abierta":        {"id": "T1049",     "name": "System Network Connections Discovery","tactic": "Discovery"},
-    "Conexiones Masivas":     {"id": "T1046",     "name": "Network Service Discovery",          "tactic": "Discovery"},
+    "Deleted Binary":         {"id": "T1070.004", "name": "File Deletion",                     "tactic": "Defense Evasion"},
+    "Suspicious Path":        {"id": "T1059",     "name": "Command and Scripting Interpreter",  "tactic": "Execution"},
+    "SUID with Network":      {"id": "T1548.001", "name": "Setuid and Setgid",                  "tactic": "Privilege Escalation"},
+    "Shell Signature":        {"id": "T1059.004", "name": "Unix Shell",                         "tactic": "Execution"},
+    "Shell with Connection":  {"id": "T1059.004", "name": "Unix Shell",                         "tactic": "Execution"},
+    "Process Masquerading":   {"id": "T1036.005", "name": "Match Legitimate Name or Location",  "tactic": "Defense Evasion"},
+    "Orphan C2 Agent":        {"id": "T1543",     "name": "Create or Modify System Process",    "tactic": "Persistence"},
+    "Atypical SSL Traffic":   {"id": "T1071.001", "name": "Web Protocols (C2 over HTTPS)",      "tactic": "Command and Control"},
+    "Suspicious C2 Port":     {"id": "T1071",     "name": "Application Layer Protocol",         "tactic": "Command and Control"},
+    "Open Listener":          {"id": "T1049",     "name": "System Network Connections Discovery","tactic": "Discovery"},
+    "Mass Connections":       {"id": "T1046",     "name": "Network Service Discovery",          "tactic": "Discovery"},
     "C2 Beaconing":           {"id": "T1071.001", "name": "Web Protocols (Beaconing)",          "tactic": "Command and Control"},
-    "Persistencia del Sistema":{"id": "T1053",    "name": "Scheduled Task/Job",                 "tactic": "Persistence"},
-    "Conexión Regular C2":    {"id": "T1571",     "name": "Non-Standard Port",                  "tactic": "Command and Control"},
+    "System Persistence":     {"id": "T1053",     "name": "Scheduled Task/Job",                 "tactic": "Persistence"},
+    "Regular C2 Connection":  {"id": "T1571",     "name": "Non-Standard Port",                  "tactic": "Command and Control"},
     "IDS/Sniffer":            {"id": "T1040",     "name": "Network Sniffing",                   "tactic": "Discovery"},
-    "Memoria Fileless":       {"id": "T1055",     "name": "Process Injection",                  "tactic": "Defense Evasion"},
+    "Fileless Memory":        {"id": "T1055",     "name": "Process Injection",                  "tactic": "Defense Evasion"},
 }
 
 NIST_MAP = {
-    "Binario Eliminado":      ("DE.CM-1",),
-    "Ruta Sospechosa":        ("DE.CM-1",),
-    "SUID con Red":           ("PR.AC-4",),
-    "Firma de Shell":         ("DE.AE-2",),
-    "Shell con Conexión":     ("DE.AE-2",),
-    "Mascarada de Proceso":   ("DE.CM-1",),
-    "Agente C2 Huérfano":     ("DE.CM-1",),
-    "Tráfico SSL Atípico":    ("DE.AE-2",),
-    "Puerto C2/Sospechoso":   ("DE.AE-2",),
-    "Escucha Abierta":        ("DE.CM-1",),
-    "Conexiones Masivas":     ("DE.AE-2",),
+    "Deleted Binary":         ("DE.CM-1",),
+    "Suspicious Path":        ("DE.CM-1",),
+    "SUID with Network":      ("PR.AC-4",),
+    "Shell Signature":        ("DE.AE-2",),
+    "Shell with Connection":  ("DE.AE-2",),
+    "Process Masquerading":   ("DE.CM-1",),
+    "Orphan C2 Agent":        ("DE.CM-1",),
+    "Atypical SSL Traffic":   ("DE.AE-2",),
+    "Suspicious C2 Port":     ("DE.AE-2",),
+    "Open Listener":          ("DE.CM-1",),
+    "Mass Connections":       ("DE.AE-2",),
     "C2 Beaconing":           ("DE.AE-2",),
-    "Persistencia del Sistema":("DE.CM-1",),
-    "Conexión Regular C2":    ("DE.AE-2",),
-    "Memoria Fileless":       ("DE.CM-7",),
+    "System Persistence":     ("DE.CM-1",),
+    "Regular C2 Connection":  ("DE.AE-2",),
+    "Fileless Memory":        ("DE.CM-7",),
 }
 
 ISO_MAP = {
-    "Binario Eliminado":      ("A.12.4.1",),
-    "Ruta Sospechosa":        ("A.12.4.1",),
-    "SUID con Red":           ("A.9.2.3",),
-    "Firma de Shell":         ("A.12.4.1",),
-    "Shell con Conexión":     ("A.12.4.1",),
-    "Mascarada de Proceso":   ("A.12.4.1",),
-    "Agente C2 Huérfano":     ("A.12.4.1",),
-    "Tráfico SSL Atípico":    ("A.13.1.1",),
-    "Puerto C2/Sospechoso":   ("A.13.1.1",),
-    "Escucha Abierta":        ("A.12.4.1",),
-    "Conexiones Masivas":     ("A.13.1.1",),
+    "Deleted Binary":         ("A.12.4.1",),
+    "Suspicious Path":        ("A.12.4.1",),
+    "SUID with Network":      ("A.9.2.3",),
+    "Shell Signature":        ("A.12.4.1",),
+    "Shell with Connection":  ("A.12.4.1",),
+    "Process Masquerading":   ("A.12.4.1",),
+    "Orphan C2 Agent":        ("A.12.4.1",),
+    "Atypical SSL Traffic":   ("A.13.1.1",),
+    "Suspicious C2 Port":     ("A.13.1.1",),
+    "Open Listener":          ("A.12.4.1",),
+    "Mass Connections":       ("A.13.1.1",),
     "C2 Beaconing":           ("A.13.1.1",),
-    "Persistencia del Sistema":("A.12.4.1",),
-    "Conexión Regular C2":    ("A.13.1.1",),
-    "Memoria Fileless":       ("A.12.6.1",),
+    "System Persistence":     ("A.12.4.1",),
+    "Regular C2 Connection":  ("A.13.1.1",),
+    "Fileless Memory":        ("A.12.6.1",),
 }
 
 # Ports commonly used by known C2 servers, botnets, shells, and miners
@@ -123,8 +123,19 @@ _BEACON_JITTER_THRESHOLD = 0.20  # CoV < 20% = highly regular = suspicious
 
 def _record_beacon_sample(pid: int, ip: str):
     """Records a connection timestamp for a given PID for beaconing detection."""
+    now = time.time()
     with _beacon_lock:
-        _beacon_tracker[pid].append((time.time(), ip))
+        if len(_beacon_tracker) > 500:
+            stale_pids = []
+            for p, q in _beacon_tracker.items():
+                if not q or now - q[-1][0] > 300:  # 5 mins stale
+                    if not psutil.pid_exists(p):
+                        stale_pids.append(p)
+            for p in stale_pids:
+                if p != pid:
+                    del _beacon_tracker[p]
+
+        _beacon_tracker[pid].append((now, ip))
 
 def _analyze_beaconing(pid: int) -> tuple[bool, float, str]:
     """
@@ -342,7 +353,7 @@ def analyze_zombie_status(force=False) -> dict:
                 exe_path = proc.exe()
                 if exe_path and "(deleted)" in exe_path:
                     findings.append(_enrich_finding({
-                        "category": "Binario Eliminado",
+                        "category": "Deleted Binary",
                         "severity": "CRITICAL",
                         "description": f"Proceso ejecutándose desde un archivo binario eliminado en disco.",
                         "pid": pid,
@@ -356,7 +367,7 @@ def analyze_zombie_status(force=False) -> dict:
                 for path in SUSPICIOUS_PATHS:
                     if exe_path.startswith(path):
                         findings.append(_enrich_finding({
-                            "category": "Ruta Sospechosa",
+                            "category": "Suspicious Path",
                             "severity": "HIGH",
                             "description": f"Ejecutable ubicado en directorio temporal/volátil: {exe_path}",
                             "pid": pid,
@@ -372,7 +383,7 @@ def analyze_zombie_status(force=False) -> dict:
                     is_suid = bool(st.st_mode & (stat.S_ISUID | stat.S_ISGID))
                     if is_suid and exe_path not in TRUSTED_SUID_BINARIES:
                         findings.append(_enrich_finding({
-                            "category": "SUID con Red",
+                            "category": "SUID with Network",
                             "severity": "HIGH",
                             "description": f"Binario con bit SUID/SGID activo tiene conexiones de red abiertas ({exe_path})",
                             "pid": pid,
@@ -414,7 +425,7 @@ def analyze_zombie_status(force=False) -> dict:
 
                         if is_suspicious_process:
                             findings.append(_enrich_finding({
-                                "category": "Memoria Fileless",
+                                "category": "Fileless Memory",
                                 "severity": "HIGH",
                                 "description": f"Se detectaron {anon_exec_regions} regiones de memoria ejecutable anónima (sin respaldo en disco). Posible inyección de shellcode / malware fileless con red activa.",
                                 "pid": pid,
@@ -423,34 +434,55 @@ def analyze_zombie_status(force=False) -> dict:
             except Exception:
                 pass
 
-            # --- 4. Check for Reverse Shell Command-line Signatures ---
+            # --- 4. Process Tree Lineage & Scoring Matrix ---
+            # Instead of binary triggers, accumulate a risk score for the process
+            proc_risk_score = 0
+            proc_findings = []
+            
+            # Helper to get parent process name safely
+            parent_name = "unknown"
+            try:
+                parent = psutil.Process(proc.info['ppid'])
+                parent_name = parent.name().lower()
+            except Exception:
+                pass
+
             if cmdline:
                 for pattern in SUSPICIOUS_CMD_PATTERNS:
                     if re.search(pattern, cmdline, re.IGNORECASE):
-                        findings.append(_enrich_finding({
-                            "category": "Firma de Shell",
-                            "severity": "CRITICAL",
-                            "description": f"Argumentos de comando sugieren una Reverse Shell o payload: {cmdline[:60]}...",
-                            "pid": pid,
-                            "proc_name": proc_name
-                        }))
+                        proc_risk_score += 40
+                        proc_findings.append(f"Firma de Shell en comando: {cmdline[:60]}")
                         break
 
-            # --- 4b. Shell Process with Active Network Connection (Process Tree Heuristic) ---
             SHELL_NAMES = {"bash", "sh", "zsh", "dash", "ash", "python", "python3", "perl", "php", "ruby"}
             if proc_name.lower() in SHELL_NAMES and conns:
                 has_external_established = any(
                     conn.status == "ESTABLISHED" and conn.raddr and not is_private_ip(conn.raddr.ip)
                     for conn in conns
                 )
-                if has_external_established and proc_name.lower() not in {"python", "python3"}:
-                    findings.append(_enrich_finding({
-                        "category": "Shell con Conexión",
-                        "severity": "WARNING",
-                        "description": f"Proceso intérprete de comandos ({proc_name}) con conexión TCP activa hacia IP pública.",
-                        "pid": pid,
-                        "proc_name": proc_name
-                    }))
+                if has_external_established:
+                    if proc_name.lower() not in {"python", "python3", "node"}:
+                        proc_risk_score += 30
+                        proc_findings.append(f"Intérprete ({proc_name}) con red ext activa")
+                    
+                    # Contextual Lineage Validation (The core of Enterprise False Positive Reduction)
+                    LEGITIMATE_PARENTS = {"sshd", "gnome-terminal-server", "konsole", "tmux", "screen", "systemd"}
+                    SUSPICIOUS_PARENTS = {"apache2", "nginx", "httpd", "php-fpm", "java", "mysql", "postgres"}
+                    
+                    if parent_name in SUSPICIOUS_PARENTS:
+                        proc_risk_score += 60 # Critical indicator of a web shell or RCE
+                        proc_findings.append(f"Anomalía de Linaje: Padre web/BD ({parent_name}) lanzó Shell ({proc_name})")
+                    elif parent_name in LEGITIMATE_PARENTS:
+                        proc_risk_score -= 50 # Strongly benign (e.g., standard SSH session)
+
+            if proc_risk_score >= 60:
+                findings.append(_enrich_finding({
+                    "category": "Shell with Connection" if "Linaje" in "".join(proc_findings) else "Firma de Shell",
+                    "severity": "CRITICAL" if proc_risk_score >= 80 else "HIGH",
+                    "description": " | ".join(proc_findings) + f" (Score: {proc_risk_score})",
+                    "pid": pid,
+                    "proc_name": proc_name
+                }))
 
             # --- 4c. Process Masquerading / Kernel Thread Spoofing ---
             is_spoofing = False
@@ -463,7 +495,7 @@ def analyze_zombie_status(force=False) -> dict:
                     pass
             if is_spoofing:
                 findings.append(_enrich_finding({
-                    "category": "Mascarada de Proceso",
+                    "category": "Process Masquerading",
                     "severity": "CRITICAL",
                     "description": f"Proceso malicioso camuflado como hilo del kernel: {proc_name} (Ruta: {exe_path})",
                     "pid": pid,
@@ -481,7 +513,7 @@ def analyze_zombie_status(force=False) -> dict:
                         )
                         if has_outbound:
                             findings.append(_enrich_finding({
-                                "category": "Agente C2 Huérfano",
+                                "category": "Orphan C2 Agent",
                                 "severity": "HIGH",
                                 "description": f"Proceso huérfano (PPID 1) no-sistema en {exe_path} con tráfico de red público.",
                                 "pid": pid,
@@ -501,7 +533,7 @@ def analyze_zombie_status(force=False) -> dict:
                         rport = conn.raddr.port
                         if rport == 443 and not is_private_ip(rip):
                             findings.append(_enrich_finding({
-                                "category": "Tráfico SSL Atípico",
+                                "category": "Atypical SSL Traffic",
                                 "severity": "HIGH",
                                 "description": f"Proceso desconocido ({proc_name}) usando puerto HTTPS (443) hacia {rip} (posible C2 beaconing).",
                                 "pid": pid,
@@ -526,7 +558,7 @@ def analyze_zombie_status(force=False) -> dict:
                     
                     if rport in C2_PORTS and not is_private_ip(rip):
                         findings.append(_enrich_finding({
-                            "category": "Puerto C2/Sospechoso",
+                            "category": "Suspicious C2 Port",
                             "severity": "CRITICAL",
                             "description": f"Conectado a puerto sospechoso/C2 ({rport}) en IP externa {rip}",
                             "pid": pid,
@@ -547,7 +579,7 @@ def analyze_zombie_status(force=False) -> dict:
                             
                         if not is_trusted:
                             findings.append(_enrich_finding({
-                                "category": "Escucha Abierta",
+                                "category": "Open Listener",
                                 "severity": "MEDIUM",
                                 "description": f"Proceso no estándar escuchando en puerto {lport} en todas las interfaces",
                                 "pid": pid,
@@ -558,7 +590,7 @@ def analyze_zombie_status(force=False) -> dict:
             if len(outbound_ips) >= 5 and proc_name.lower() not in WHITELISTED_MASS_CONN_PROCS:
                 sev = "CRITICAL" if len(outbound_ips) >= 10 else "HIGH"
                 findings.append(_enrich_finding({
-                    "category": "Conexiones Masivas",
+                    "category": "Mass Connections",
                     "severity": sev,
                     "description": f"Estableció conexiones simultáneas a {len(outbound_ips)} IPs públicas distintas (posible DDoS o escaneo)",
                     "pid": pid,
@@ -601,7 +633,7 @@ def analyze_zombie_status(force=False) -> dict:
                     # Check if the process binary appears in cron
                     if exe_path in cron_out or (proc_name and proc_name in cron_out):
                         findings.append(_enrich_finding({
-                            "category": "Persistencia del Sistema",
+                            "category": "System Persistence",
                             "severity": "HIGH",
                             "description": (
                                 f"Proceso sospechoso '{proc_name}' en ruta {exe_path} encontrado en las "

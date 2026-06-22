@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TCPspecter - Centro de Aprendizaje &amp; Guía de Uso</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #080c14;
+            --card-bg: rgba(17, 24, 39, 0.7);
+            --card-border: rgba(255, 255, 255, 0.06);
+            --text-main: #f3f4f6;
+            --text-muted: #9ca3af;
+            --primary: #4a7a9d;
+            --accent: #f2e8c9;
+            --danger: #f87171;
+            --warning: #fbbf24;
+            --success: #34d399;
+            --shadow: rgba(0, 0, 0, 0.4);
+        }
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Outfit', sans-serif;
+        }
+        body {
+            background-color: var(--bg-color);
+            background-image: radial-gradient(circle at 10% 20%, rgba(74, 122, 157, 0.08) 0%, transparent 40%),
+                              radial-gradient(circle at 90% 80%, rgba(242, 232, 201, 0.05) 0%, transparent 40%);
+            color: var(--text-main);
+            min-height: 100vh;
+            padding: 24px;
+        }
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--card-border);
+        }
+        .logo-section h1 {
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--text-main);
+        }
+        .logo-section h1 span {
+            color: var(--primary);
+        }
+        .logo-section p {
+            font-size: 13px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+        .nav-btn {
+            background: rgba(74, 122, 157, 0.15);
+            border: 1px solid var(--primary);
+            color: var(--text-main);
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 13px;
+            cursor: pointer;
+            text-decoration: none;
+            transition: all 0.2s;
+        }
+        .nav-btn:hover {
+            background: rgba(74, 122, 157, 0.3);
+        }
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            padding: 32px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 10px 30px var(--shadow);
+        }
+        h2 {
+            font-size: 22px;
+            margin: 30px 0 15px;
+            color: var(--accent);
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            padding-bottom: 8px;
+        }
+        h2:first-of-type {
+            margin-top: 0;
+        }
+        p {
+            font-size: 14px;
+            line-height: 1.6;
+            color: var(--text-main);
+            margin-bottom: 16px;
+        }
+        ul, ol {
+            margin-left: 20px;
+            margin-bottom: 16px;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        li {
+            margin-bottom: 8px;
+        }
+        code {
+            background: rgba(0,0,0,0.3);
+            color: var(--accent);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 13px;
+        }
+        .code-block {
+            background: #04060b;
+            border: 1px solid var(--card-border);
+            border-radius: 8px;
+            padding: 16px;
+            font-family: monospace;
+            font-size: 13px;
+            color: #d1d5db;
+            overflow-x: auto;
+            margin: 16px 0;
+            white-space: pre;
+        }
+        .highlight {
+            color: var(--danger);
+            font-weight: 600;
+        }
+        .highlight-success {
+            color: var(--success);
+            font-weight: 600;
+        }
+        .card-tip {
+            background: rgba(74, 122, 157, 0.1);
+            border-left: 4px solid var(--primary);
+            padding: 16px;
+            border-radius: 0 8px 8px 0;
+            margin: 20px 0;
+        }
+        .card-warning {
+            background: rgba(248, 113, 113, 0.1);
+            border-left: 4px solid var(--danger);
+            padding: 16px;
+            border-radius: 0 8px 8px 0;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="logo-section">
+            <h1 data-i18n="tut_title">TCPspecter - <span>Guía &amp; Aprendizaje</span></h1>
+            <p data-i18n="tut_subtitle">Centro educativo para Analistas y Administradores de Redes</p>
+        </div>
+        <div style="display:flex; gap:16px; align-items:center;">
+            <div class="lang-selector" style="display:flex; gap:6px; margin-right:8px;">
+                <button class="lang-btn" data-lang="es" onclick="changeLanguage('es')" style="background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); color: var(--text-muted); padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; cursor: pointer;">ES</button>
+                <button class="lang-btn" data-lang="en" onclick="changeLanguage('en')" style="background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); color: var(--text-muted); padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; cursor: pointer;">EN</button>
+            </div>
+            <a href="/" class="nav-btn" data-i18n="nav_dashboard">📊 Volver al Dashboard</a>
+        </div>
+    </header>
+    <div class="container" id="tut_content">
+        <!-- Dynamic content mapped from language dictionary -->
+    </div>
+    <script>
+        const translations = {
+            es: {
+                nav_dashboard: "📊 Volver al Dashboard",
+                tut_title: "TCPspecter - <span>Guía &amp; Aprendizaje</span>",
+                tut_subtitle: "Centro educativo para Analistas y Administradores de Redes",
+                content: `
+                    <h2>📖 Guía de Uso Rápido de TCPspecter</h2>
+                    <p>TCPspecter no es un simple analizador de tráfico pasivo. Es una plataforma orientada a la <strong>Detección de Amenazas y Prevención de Fugas de Datos (DLP)</strong> en sistemas GNU/Linux, combinando análisis de sockets en tiempo real con una interfaz TUI intuitiva y un dashboard gráfico en el navegador.</p>
+                    
+                    <h2>🔬 Módulos de Ciberseguridad</h2>
+                    
+                    <h3>1. Prevención de Pérdida de Datos (DLP)</h3>
+                    <p>El motor DLP monitoriza el uso no autorizado de canales de red salientes por parte de utilidades del sistema. Las alertas de DLP se disparan cuando:</p>
+                    <ul>
+                        <li><span class="highlight">Intérpretes de comandos en red:</span> Consolas tipo <code>bash</code>, <code>sh</code>, o ejecutables como <code>nc</code> (Netcat) o <code>python</code> abren sockets activos hacia IPs públicas. Esto suele ser evidencia de una <strong>Reverse Shell (consola inversa)</strong> o un script exfiltrando datos locales.</li>
+                        <li><span class="highlight">SUID con permisos de red:</span> Un archivo binario con bit de ejecución SUID o SGID configurado se ejecuta y abre sockets activos en red.</li>
+                        <li><span class="highlight">Binarios volátiles:</span> Procesos corriendo desde rutas temporales o volátiles como <code>/tmp</code> o <code>/dev/shm</code> que establecen flujos de red.</li>
+                    </ul>
+
+                    <h3>2. Detección y Respuesta en Red (NDR)</h3>
+                    <p>El motor NDR evalúa el comportamiento de red global de la máquina para detectar actividades sospechosas o de comando y control (C2):</p>
+                    <ul>
+                        <li><span class="highlight">Conexiones Masivas (DDoS/Escaneos):</span> Si un script o binario no autorizado intenta abrir conexiones simultáneas hacia múltiples IPs públicas (más de 5 o 10 destinos), el sistema alerta de inmediato. <em>Nota: Los navegadores y chats comunes están excluidos (whitelisted) para evitar falsas alarmas.</em></li>
+                        <li><span class="highlight">Conexiones C2 (Botnets / Cryptominers):</span> Monitoreo en tiempo real de sockets con destinos asociados a puertos comunes de botnets IRC (<code>6667</code>), nodos Tor (<code>9050</code>), consolas de RATs o mineros (Stratum <code>3333</code>).</li>
+                    </ul>
+
+                    <div class="card-tip">
+                        <strong>💡 Consejo Práctico (Mitigación Manual):</strong><br>
+                        Como TCPspecter es un detector pasivo seguro, <strong>no bloquea tráfico de forma automática</strong> para prevenir cortes accidentales en servicios legítimos del sistema. Toda la mitigación queda bajo tu control.
+                    </div>
+
+                    <h2>🛠️ Comandos de Respuesta y Mitigación en Linux</h2>
+                    <p>Si detectas un evento malicioso (marcado como <code>CRITICAL</code> o <code>HIGH</code>), puedes tomar acción inmediata con las siguientes herramientas nativas del sistema operativo:</p>
+                    
+                    <h3>A. Terminar el Proceso Sospechoso (Kill)</h3>
+                    <p>Desde la TUI de TCPspecter, puedes presionar la tecla <kbd>x</kbd> sobre el proceso para cerrarlo. Alternativamente en tu terminal puedes ejecutar:</p>
+                    <div class="code-block">sudo kill -9 [PID]</div>
+                    
+                    <h3>B. Bloquear la IP atacante o C2 (Firewall)</h3>
+                    <p>Para cerrar la comunicación con una IP pública sospechosa, agrégala a las reglas de tu firewall de Linux:</p>
+                    <div class="code-block"># Usando UFW (Uncomplicated Firewall)
+sudo ufw deny out to [IP_SOSPECHOSA]
+
+# Usando IPTables directamente
+sudo iptables -A OUTPUT -d [IP_SOSPECHOSA] -j DROP</div>
+
+                    <h3>C. Investigar persistencia en el sistema</h3>
+                    <p>El malware suele crear persistencia. Investiga si el proceso tiene tareas programadas o servicios de systemd configurados:</p>
+                    <div class="code-block"># Buscar en cronjobs de root
+sudo crontab -l
+
+# Revisar servicios systemd recientemente modificados
+ls -lt /etc/systemd/system/ | head -n 10</div>
+
+                    <h3>🐙 Repositorio Oficial y GitHub</h3>
+                    <p>El código fuente completo y las instrucciones sumamente detalladas sobre <strong>cómo usar, configurar y probar el sistema</strong> (incluyendo la emulación de adversarios mediante playbooks, configuraciones del firewall y solución de problemas) están documentados en nuestro repositorio oficial de <strong>GitHub</strong>. Te recomendamos consultar el README principal y la wiki del proyecto para obtener un manual detallado paso a paso.</p>
+                `
+            },
+            en: {
+                nav_dashboard: "📊 Back to Dashboard",
+                tut_title: "TCPspecter - <span>Guide &amp; Learning</span>",
+                tut_subtitle: "Educational hub for Network Analysts &amp; Administrators",
+                content: `
+                    <h2>📖 TCPspecter Quick Start Guide</h2>
+                    <p>TCPspecter is not just a passive packet sniffer. It is a live <strong>Threat Detection and Data Loss Prevention (DLP)</strong> platform for GNU/Linux systems, combining real-time socket analysis with an intuitive TUI and a premium web-based dashboard.</p>
+                    
+                    <h2>🔬 Cybersecurity Modules</h2>
+                    
+                    <h3>1. Data Loss Prevention (DLP)</h3>
+                    <p>The DLP engine monitors unauthorized use of outbound network channels by local utilities. DLP alerts trigger when:</p>
+                    <ul>
+                        <li><span class="highlight">Command interpreters on network:</span> Shells like <code>bash</code>, <code>sh</code>, or utilities like <code>nc</code> (Netcat) or <code>python</code> open active sockets to public IPs. This is common evidence of a <strong>Reverse Shell</strong> or data exfiltration.</li>
+                        <li><span class="highlight">SUID with Network Privileges:</span> A binary file with active SUID or SGID permissions runs and holds open network sockets.</li>
+                        <li><span class="highlight">Volatile binaries:</span> Processes running from temporary folders like <code>/tmp</code> or <code>/dev/shm</code> that initiate network flows.</li>
+                    </ul>
+
+                    <h3>2. Network Detection and Response (NDR)</h3>
+                    <p>The NDR engine evaluates the host's overall network behaviors to detect zombie node activity or Command & Control (C2) beacons:</p>
+                    <ul>
+                        <li><span class="highlight">Massive Outbound Connections (DDoS/Scanning):</span> If an untrusted script or rogue binary opens sockets to multiple public IPs (more than 5 or 10 destinations), the system flags it instantly. <em>Note: Common web browsers and chat apps are whitelisted to prevent false positives.</em></li>
+                        <li><span class="highlight">C2/Botnet Connections:</span> Live socket scans matching destination ports of IRC botnets (<code>6667</code>), Tor nodes (<code>9050</code>), RAT consoles, or cryptominers (Stratum <code>3333</code>).</li>
+                    </ul>
+
+                    <div class="card-tip">
+                        <strong>💡 Practical Tip (Manual Mitigation):</strong><br>
+                        Since TCPspecter is a safe passive detector, <strong>it does not block traffic automatically</strong> to prevent accidentally bringing down critical services. Mitigation is fully left to the operator.
+                    </div>
+
+                    <h2>🛠️ Mitigation &amp; Response Commands in Linux</h2>
+                    <p>If you detect a malicious event (marked <code>CRITICAL</code> or <code>HIGH</code>), you can take action using native Linux tools:</p>
+                    
+                    <h3>A. Terminate the Suspicious Process (Kill)</h3>
+                    <p>In the TCPspecter TUI, highlight the process and press <kbd>x</kbd>. Alternatively, run from your terminal:</p>
+                    <div class="code-block">sudo kill -9 [PID]</div>
+                    
+                    <h3>B. Block the Attacking or C2 IP (Firewall)</h3>
+                    <p>To drop all outbound packets destined to a suspicious public IP, add it to your Linux firewall:</p>
+                    <div class="code-block"># Using UFW (Uncomplicated Firewall)
+sudo ufw deny out to [SUSPICIOUS_IP]
+
+# Using IPTables directly
+sudo iptables -A OUTPUT -d [SUSPICIOUS_IP] -j DROP</div>
+
+                    <h3>C. Audit System Persistence</h3>
+                    <p>Malware often establishes persistence. Check if the process has scheduled cronjobs or active systemd services:</p>
+                    <div class="code-block"># List root cronjobs
+sudo crontab -l
+
+# Check recently updated systemd services
+ls -lt /etc/systemd/system/ | head -n 10</div>
+
+                    <h3>🐙 Official Repository &amp; GitHub</h3>
+                    <p>The complete source code and highly detailed instructions on <strong>how to run, configure, and use the platform</strong> (including incident response playbooks for adversary emulation, firewall rules setup, and system diagnostics) are thoroughly documented in our official <strong>GitHub</strong> repository. Please refer to the main README and project wiki for a complete step-by-step user guide.</p>
+                `
+            }
+        };
+
+        function changeLanguage(lang) {
+            localStorage.setItem('language', lang);
+            applyLanguage();
+        }
+
+        function applyLanguage() {
+            const lang = localStorage.getItem('language') || 'en';
+            document.querySelectorAll('[data-i18n]').forEach(el => {
+                const key = el.getAttribute('data-i18n');
+                if (translations[lang][key]) {
+                    el.innerHTML = translations[lang][key];
+                }
+            });
+            document.getElementById('tut_content').innerHTML = translations[lang]['content'];
+
+            // Style active language button
+            document.querySelectorAll('.lang-btn').forEach(b => {
+                const isCurrent = b.getAttribute('data-lang') === lang;
+                b.style.background = isCurrent ? 'rgba(74, 122, 157, 0.3)' : 'rgba(255,255,255,0.03)';
+                b.style.borderColor = isCurrent ? 'var(--primary)' : 'var(--card-border)';
+                b.style.color = isCurrent ? 'var(--text-main)' : 'var(--text-muted)';
+            });
+        }
+
+        window.onload = () => {
+            applyLanguage();
+        };
+    </script>
+</body>
+</html>

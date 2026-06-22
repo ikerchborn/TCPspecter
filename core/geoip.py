@@ -51,8 +51,9 @@ async def lookup_ip_geoip(ip_str):
         return None
         
     global geoip_cache
-    if len(geoip_cache) > 2000:
-        geoip_cache.clear()
+    if len(geoip_cache) > 10000:
+        # Prevent memory leaks by shrinking to half when limit is reached
+        geoip_cache = dict(list(geoip_cache.items())[5000:])
         
     if ip_str in geoip_cache:
         return geoip_cache[ip_str]
@@ -116,7 +117,7 @@ async def lookup_ip_geoip(ip_str):
     lat = (h % 14000) / 100.0 - 70.0  # -70 to +70
     lon = ((h // 14000) % 36000) / 100.0 - 180.0 # -180 to 180
     
-    return {
+    fallback_res = {
         "country": "Offline / Estimado",
         "city": "Fallback",
         "org": "Desconocido",
@@ -124,3 +125,5 @@ async def lookup_ip_geoip(ip_str):
         "lon": lon,
         "is_local": False
     }
+    geoip_cache[ip_str] = fallback_res
+    return fallback_res

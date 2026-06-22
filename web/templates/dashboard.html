@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TCPspecter - Panel de Control Gráfico</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+    <link rel="stylesheet" href="/static/css/dashboard.css?v=3.0">
+</head>
+<body>
+    <header>
+        <div class="logo-section" style="cursor:pointer" onclick="window.location.href='/'">
+            <h1>TCP<span>specter</span></h1>
+            <p data-i18n="subtitle">Network Security Analytics &mdash; DLP + NDR + NTA + Explanation Engine</p>
+        </div>
+        <div style="display:flex; gap:16px; align-items:center;">
+            <nav style="display:flex; gap:12px; margin-right: 16px; align-items: center;">
+                <a href="/" style="color: var(--text-main); text-decoration: none; font-size: 14px; font-weight: 600;" data-i18n="nav_dashboard">Dashboard</a>
+                <a href="/firewall" style="color: var(--text-main); text-decoration: none; font-size: 14px; font-weight: 600;" data-i18n="nav_firewall">Firewall & IDS</a>
+                <a href="/logs" style="color: var(--text-main); text-decoration: none; font-size: 14px; font-weight: 600;" data-i18n="nav_logs">Security Logs</a>
+                <a href="/configuration" style="color: var(--text-main); text-decoration: none; font-size: 14px; font-weight: 600;" data-i18n="nav_config">Configuración</a>
+            </nav>
+            <button id="security_toggle_btn"
+                onclick="toggleSecurity()"
+                style="background: rgba(52,211,153,0.15); color: #34d399; border: 1px solid #34d399;
+                       padding: 6px 16px; border-radius: 8px; cursor: pointer; font-family: inherit;
+                       font-size: 13px; font-weight: 600; letter-spacing: 0.05em;"
+                data-i18n="btn_sec_active"
+            >
+                &#9679; ANALÍTICA ACTIVA
+            </button>
+            <div class="status-badge">
+                <span class="status-dot"></span>
+                <span data-i18n="status_live">Monitoreo en Vivo</span>
+            </div>
+            <div class="status-badge" style="background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); color: var(--text-main); font-weight: 500; gap: 12px;">
+                <span>CPU: <span id="sys_cpu" style="color: var(--primary); font-weight: 700;">0.0%</span></span>
+                <span style="border-left: 1px solid var(--card-border); padding-left: 12px;">RAM: <span id="sys_ram" style="color: var(--accent); font-weight: 700;">0.0%</span></span>
+            </div>
+        </div>
+    </header>
+
+    <!-- SPA Wrappers -->
+    <div class="container">
+    <!-- View: Dashboard -->
+    <div id="view_dashboard" class="spa-view">
+        <div class="dashboard-grid">
+        <div class="card grid-span-2" onclick="showModuleHelp('security', event)">
+            <div class="card-title" data-i18n="sec_analysis">Análisis de Seguridad de Red (C2 / Máquina Zombie)</div>
+            <div class="security-score-container">
+                <div class="score-circle" id="risk_gradient">
+                    <div class="score-circle-inner">
+                        <span class="score-num" id="risk_score">0</span>
+                        <span class="score-lbl" data-i18n="score_lbl">Riesgo</span>
+                    </div>
+                </div>
+                <div class="security-details">
+                    <div>
+                        <span class="text-muted" style="font-size: 13px;" data-i18n="sec_threat_level">Nivel de Amenaza:</span>
+                        <span class="severity-badge" id="risk_level">CALCULANDO...</span>
+                    </div>
+                    <div class="detail-item"><span data-i18n="active_alerts_lbl">Alertas Activas:</span> <span class="detail-value text-main" id="findings_count">0</span></div>
+                    <div class="formula-card" data-i18n="risk_formula">
+                        <strong>Fórmula Heurística de Riesgo:</strong><br>
+                        • Crítico (+40): Reverse Shell, C2, binario borrado<br>
+                        • Alto (+25): Ejecución en /tmp, SUID con red<br>
+                        • Medio (+10): Puerto abierto no confiable<br>
+                        • Riesgo Máximo acotado a 100.
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- System Stats Pie Chart -->
+        <div class="card" onclick="showModuleHelp('proto', event)">
+            <div class="card-title" data-i18n="chart_proto_dist">Distribución de Protocolos</div>
+            <div class="chart-container">
+                <canvas id="protoChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Top CPU Processes Chart -->
+        <div class="card" onclick="showModuleHelp('cpu', event)">
+            <div class="card-title" data-i18n="chart_top_cpu">Top Procesos CPU (%)</div>
+            <div class="chart-container">
+                <canvas id="procChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bandwidth History Chart, Entropy Chart & Security Alerts List -->
+    <div class="dashboard-grid" style="grid-template-columns: 1.5fr 1.5fr 1fr; margin-bottom: 24px;">
+        <div class="card" onclick="showModuleHelp('bandwidth', event)">
+            <div class="card-title" data-i18n="chart_bandwidth">Tráfico de Red Histórico (Mbps)</div>
+            <div class="chart-container-large">
+                <canvas id="bandwidthChart"></canvas>
+            </div>
+        </div>
+        <div class="card" onclick="showModuleHelp('entropy', event)">
+            <div class="card-title">Entropía de Payload Histórica</div>
+            <div class="chart-container-large">
+                <canvas id="entropyChart"></canvas>
+            </div>
+        </div>
+        <div class="card" style="display: flex; flex-direction: column;" onclick="showModuleHelp('alerts', event)">
+            <div class="card-title" data-i18n="sec_alerts_active">Alertas C2 / Comportamientos Zombie</div>
+            <div style="flex: 1; overflow-y: auto; max-height: 220px;" id="alerts_list">
+                <div style="color: var(--text-muted); font-style: italic; text-align: center; margin-top: 40px;" data-i18n="no_alerts">No se han detectado alertas de seguridad activas.</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- DNS Tunneling & Heurísticas de Tráfico -->
+    <div class="card" style="display: flex; flex-direction: column; margin-bottom: 24px;" onclick="showModuleHelp('dlp_ndr', event)">
+        <div class="card-title">DNS Tunneling & Heurísticas de Tráfico</div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 12px;">
+            <div style="background: rgba(255,255,255,0.01); border: 1px solid var(--card-border); border-radius: 10px; padding: 10px; text-align: center;">
+                <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">Paquetes Sniffeados</div>
+                <div id="scapy_packet_count" style="font-size: 20px; font-weight: 700; color: var(--primary); margin-top: 4px;">0</div>
+            </div>
+            <div style="background: rgba(255,255,255,0.01); border: 1px solid var(--card-border); border-radius: 10px; padding: 10px; text-align: center;">
+                <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">Entropía de Payload</div>
+                <div id="scapy_avg_entropy" style="font-size: 20px; font-weight: 700; color: var(--accent); margin-top: 4px;">0.00</div>
+            </div>
+        </div>
+        <div style="flex: 1; overflow-y: auto; max-height: 180px;">
+            <strong style="font-size: 13px; color: var(--text-muted); display: block; margin-bottom: 8px; text-transform: uppercase;">Alertas de Tráfico / DNS / DLP:</strong>
+            <div id="dns_dlp_alerts" style="display: flex; flex-direction: column; gap: 8px;">
+                <div style="color: var(--text-muted); font-style: italic; text-align: center; margin-top: 20px; font-size: 12px;">No hay alertas en tiempo real de Scapy/DNS.</div>
+            </div>
+        </div>
+    </div>
+</div> <!-- End View: Dashboard -->
+
+    <!-- View: Firewall -->
+    <div id="view_firewall" class="spa-view" style="display:none;">
+        <!-- Firewall & Snort Enterprise Panel -->
+        <div class="card" style="margin-bottom: 24px;" onclick="showModuleHelp('ids_fw', event)">
+        <div class="connections-header" style="margin-bottom: 16px; border-bottom: 1px solid var(--card-border); padding-bottom: 12px;">
+            <div class="connections-title">
+                <h2 data-i18n="fw_title" style="font-size: 18px; color: var(--text-main); margin: 0;">Network Security Policies (Firewall & IDS)</h2>
+                <p data-i18n="fw_subtitle" style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Configuración avanzada de interfaces, IPS y filtrado de red</p>
+            </div>
+            <div style="display: flex; gap: 12px; align-items: center;">
+                <div style="display: flex; flex-direction: column; align-items: flex-end; margin-right: 12px;">
+                    <div style="display: flex; align-items: center; gap: 6px;">
+                        <strong data-i18n="fw_snort_lbl" style="font-size: 12px; color: var(--text-muted);">Servicio Snort:</strong>
+                        <span id="snort_badge" class="severity-badge sev-bajo" style="font-size: 10px;">Cargando...</span>
+                    </div>
+                    <div id="snort_info" style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Detectando estado...</div>
+                </div>
+                <button id="install_snort_btn" onclick="installSnort()" style="display: none; background: rgba(74, 122, 157, 0.15); border: 1px solid var(--primary); color: var(--text-main); padding: 8px 16px; border-radius: 6px; font-size: 12px; cursor: pointer; font-weight: 600; transition: all 0.2s;" data-i18n="fw_install_btn">Instalar Snort</button>
+                <button id="toggle_snort_btn" onclick="toggleSnort()" style="background: rgba(255,255,255,0.05); border: 1px solid var(--card-border); color: var(--text-main); padding: 8px 16px; border-radius: 6px; font-size: 12px; cursor: pointer; font-weight: 600; transition: all 0.2s;" data-i18n="fw_toggle_btn">Iniciar/Detener</button>
+            </div>
+        </div>
+
+        <!-- Enterprise Rule Builder -->
+        <div style="background: rgba(13, 19, 31, 0.4); border: 1px solid var(--card-border); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <strong data-i18n="fw_builder_title" style="font-size: 14px; color: var(--primary);">+ Nueva Regla de Cortafuegos (Rule Builder)</strong>
+                <div style="display: flex; gap: 8px;">
+                    <input type="text" id="block_ip_input" placeholder="Quick Block: IP a bloquear" style="width: 220px; background: rgba(17, 24, 39, 0.8); border: 1px solid var(--card-border); border-radius: 6px; padding: 6px 12px; color: var(--text-main); outline: none; font-size: 12px;">
+                    <button onclick="blockIP()" style="background: rgba(248, 113, 113, 0.15); border: 1px solid var(--danger); color: var(--danger); padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-weight: 600;" data-i18n="fw_drop_btn">Drop (Quick)</button>
+                </div>
+            </div>
+            
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; align-items: end;">
+                <div>
+                    <label data-i18n="fw_action_lbl" style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 6px; font-weight: 600;">Acción *</label>
+                    <select id="rb_action" style="width: 100%; background: rgba(17, 24, 39, 0.8); border: 1px solid var(--card-border); border-radius: 6px; padding: 8px; color: var(--text-main); font-size: 12px; outline: none; cursor: pointer;">
+                        <option value="DENY" data-i18n="fw_opt_deny">Bloquear (DENY)</option>
+                        <option value="ALLOW" data-i18n="fw_opt_allow">Permitir (ALLOW)</option>
+                    </select>
+                </div>
+                <div>
+                    <label data-i18n="fw_proto_lbl" style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 6px; font-weight: 600;">Protocolo</label>
+                    <select id="rb_protocol" style="width: 100%; background: rgba(17, 24, 39, 0.8); border: 1px solid var(--card-border); border-radius: 6px; padding: 8px; color: var(--text-main); font-size: 12px; outline: none; cursor: pointer;">
+                        <option value="all">ALL</option>
+                        <option value="tcp">TCP</option>
+                        <option value="udp">UDP</option>
+                        <option value="icmp">ICMP</option>
+                    </select>
+                </div>
+                <div>
+                    <label data-i18n="fw_src_lbl" style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 6px; font-weight: 600;">IP Origen</label>
+                    <input type="text" id="rb_src_ip" placeholder="Cualquiera" style="width: 100%; background: rgba(17, 24, 39, 0.8); border: 1px solid var(--card-border); border-radius: 6px; padding: 8px; color: var(--text-main); font-size: 12px; outline: none;">
+                </div>
+                <div>
+                    <label data-i18n="fw_dst_lbl" style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 6px; font-weight: 600;">IP Destino</label>
+                    <input type="text" id="rb_dst_ip" placeholder="Cualquiera" style="width: 100%; background: rgba(17, 24, 39, 0.8); border: 1px solid var(--card-border); border-radius: 6px; padding: 8px; color: var(--text-main); font-size: 12px; outline: none;">
+                </div>
+                <div>
+                    <label data-i18n="fw_port_lbl" style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 6px; font-weight: 600;">Puerto</label>
+                    <input type="number" id="rb_port" placeholder="Todos" style="width: 100%; background: rgba(17, 24, 39, 0.8); border: 1px solid var(--card-border); border-radius: 6px; padding: 8px; color: var(--text-main); font-size: 12px; outline: none;">
+                </div>
+                <div>
+                    <button onclick="addCustomRule()" style="width: 100%; background: rgba(74, 122, 157, 0.2); border: 1px solid var(--primary); color: var(--text-main); padding: 9px; border-radius: 6px; font-size: 12px; cursor: pointer; font-weight: 600; transition: background 0.2s;" data-i18n="fw_apply_btn">Aplicar Regla</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Active Rules Table -->
+        <div style="margin-top: 16px;">
+            <strong data-i18n="fw_active_rules_lbl" style="font-size: 14px; display: block; margin-bottom: 12px; color: var(--text-main);">Reglas Cortafuegos Activas:</strong>
+            <div class="table-container" style="max-height: 250px; border: 1px solid var(--card-border); border-radius: 8px; overflow: hidden;">
+                <table style="font-size: 12px; width: 100%; border-collapse: collapse;">
+                    <thead>
+                        <tr style="background: rgba(17, 24, 39, 0.9); border-bottom: 1px solid var(--card-border);">
+                            <th data-i18n="fw_tbl_rule" style="padding: 12px; text-align: left; color: var(--text-muted); font-weight: 600;">Regla / IP Afectada</th>
+                            <th data-i18n="fw_tbl_backend" style="padding: 12px; text-align: left; color: var(--text-muted); font-weight: 600;">Gestor (Backend)</th>
+                            <th data-i18n="fw_tbl_policy" style="padding: 12px; text-align: left; color: var(--text-muted); font-weight: 600;">Política (Target)</th>
+                            <th data-i18n="fw_tbl_action" style="padding: 12px; text-align: left; color: var(--text-muted); font-weight: 600; width: 100px;">Acción</th>
+                        </tr>
+                    </thead>
+                    <tbody id="firewall_tbody">
+                        <tr>
+                            <td colspan="4" style="text-align: center; color: var(--text-muted); padding: 20px 0;" data-i18n="fw_tbl_loading">Cargando reglas...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div> <!-- End View: Firewall -->
+
+    <!-- Shared Map & Connections Container -->
+    <div id="shared_monitoring">
+
+    <!-- Cyber-Node Global Map Section -->
+    <div class="card" style="margin-bottom: 24px;" onclick="showModuleHelp('map', event)">
+        <div class="connections-header" style="margin-bottom: 0; display: flex; justify-content: space-between; align-items: center;">
+            <div class="connections-title">
+                <h2 data-i18n="map_title">Mapa Global de Conexiones</h2>
+                <p data-i18n="map_desc" style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Análisis de Nodos de Tráfico en Tiempo Real</p>
+            </div>
+            <button onclick="resetMapView(); event.stopPropagation();" style="background: rgba(74, 122, 157, 0.15); border: 1px solid var(--primary); color: var(--text-main); padding: 6px 14px; border-radius: 6px; font-size: 12px; cursor: pointer; font-weight: 600;" data-i18n="map_recenter_btn">Recentrar Mapa</button>
+        </div>
+        <div id="globeChart" style="width: 100%; height: 500px;"></div>
+    </div>
+
+    <!-- Active Connections Table Section -->
+    <div class="card" onclick="showModuleHelp('connections', event)">
+        <div class="connections-header">
+            <div class="connections-title">
+                <h2 data-i18n="conns_title">Conexiones del Sistema Activas</h2>
+                <p data-i18n="conns_desc" style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Selecciona cualquier fila para traducir e interpretar lo que está pasando en la red.</p>
+            </div>
+            <div class="search-box">
+                <input type="text" class="search-input" id="search_bar" placeholder="Buscar (proceso, PID, IP, puerto, estado)..." oninput="filterTable()">
+            </div>
+        </div>
+
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th data-i18n="hdr_proc">Proceso</th>
+                        <th data-i18n="hdr_pid">PID</th>
+                        <th data-i18n="hdr_proto">Proto</th>
+                        <th data-i18n="hdr_src_ip">IP Origen</th>
+                        <th data-i18n="hdr_src_port">Pto Orig.</th>
+                        <th data-i18n="hdr_dst_ip">IP Destino</th>
+                        <th data-i18n="hdr_dst_port">Pto Dest.</th>
+                        <th data-i18n="hdr_status">Estado</th>
+                        <th data-i18n="hdr_eval">Evaluación</th>
+                    </tr>
+                </thead>
+                <tbody id="connections_tbody">
+                    <tr>
+                        <td colspan="9" style="text-align: center; color: var(--text-muted); padding: 40px 0;" data-i18n="conns_loading">Cargando conexiones del sistema...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+    </div> <!-- End Shared Monitoring -->
+
+    <!-- View: Configuration -->
+    <div id="view_configuration" class="spa-view" style="display:none;">
+        <div class="card" style="margin-bottom: 24px;">
+            <h2 data-i18n="config_title" style="margin-bottom: 16px;">Configuración del Sistema</h2>
+            
+            <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--card-border); padding: 16px; border-radius: 12px; margin-bottom: 16px;">
+                <h3 data-i18n="config_lang">Idioma / Language</h3>
+                <p data-i18n="config_lang_desc" style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">Selecciona el idioma de la interfaz gráfica.</p>
+                <div style="display: flex; gap: 12px;">
+                    <button class="lang-btn" data-lang="es" onclick="changeLanguage('es')" style="background: rgba(74, 122, 157, 0.15); border: 1px solid var(--primary); color: var(--text-main); padding: 8px 24px; border-radius: 8px; cursor: pointer; font-weight: 600;">Español</button>
+                    <button class="lang-btn" data-lang="en" onclick="changeLanguage('en')" style="background: rgba(255,255,255,0.05); border: 1px solid var(--card-border); color: var(--text-main); padding: 8px 24px; border-radius: 8px; cursor: pointer; font-weight: 600;">English</button>
+                </div>
+            </div>
+
+            <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--card-border); padding: 16px; border-radius: 12px;">
+                <h3 data-i18n="config_tutorial">Tutoriales y Documentación</h3>
+                <p data-i18n="config_tutorial_desc" style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">Aprende cómo usar TCPspecter y explorar sus capacidades.</p>
+                <a href="/tutorial" style="display: inline-block; background: rgba(52, 211, 153, 0.15); border: 1px solid var(--success); color: var(--success); padding: 8px 24px; border-radius: 8px; cursor: pointer; font-weight: 600; text-decoration: none;" data-i18n="config_tutorial_btn">Ver Tutorial Interactivo</a>
+            </div>
+        </div>
+    </div> <!-- End View: Configuration -->
+
+    <!-- View: Logs -->
+    <div id="view_logs" class="spa-view" style="display:none;">
+        <div class="card" style="margin-bottom: 24px;">
+            <div class="connections-header" style="margin-bottom: 16px;">
+                <div class="connections-title">
+                    <h2 data-i18n="logs_title">Logs de Seguridad Historial</h2>
+                    <p data-i18n="logs_subtitle" style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Logs y Auditoría de Amenazas Avanzadas en Tiempo Real</p>
+                </div>
+            </div>
+
+            <div class="filter-row">
+                <input type="text" id="search_log" class="search-bar" placeholder="Buscar por proceso, PID, descripción..." oninput="filterLogs()">
+                <button class="filter-btn active" id="btn_filter_all" onclick="setFilter('status', 'ALL', this)" data-i18n="filter_all">Todos</button>
+                <button class="filter-btn" id="btn_filter_det" onclick="setFilter('status', 'DETECTED', this)" data-i18n="filter_det">⚠️ Detectados</button>
+                <button class="filter-btn" id="btn_filter_res" onclick="setFilter('status', 'RESOLVED', this)" data-i18n="filter_res">✅ Resueltos</button>
+                <button class="filter-btn" id="btn_filter_crit" onclick="setFilter('severity', 'CRITICAL', this)" data-i18n="filter_crit">🔴 Crítico</button>
+                <button class="filter-btn" id="btn_filter_high" onclick="setFilter('severity', 'HIGH', this)" data-i18n="filter_high">🟡 Alto</button>
+            </div>
+            <div style="overflow-x: auto;">
+                <table class="log-table" style="width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px;">
+                    <thead>
+                        <tr style="background: rgba(17, 24, 39, 0.9); border-bottom: 1px solid var(--card-border);">
+                            <th data-i18n="col_date" style="padding: 12px; text-align: left; color: var(--text-muted); font-weight: 600;">Fecha/Hora</th>
+                            <th data-i18n="col_status" style="padding: 12px; text-align: left; color: var(--text-muted); font-weight: 600;">Estado</th>
+                            <th data-i18n="col_sev" style="padding: 12px; text-align: left; color: var(--text-muted); font-weight: 600;">Severidad</th>
+                            <th data-i18n="col_cat" style="padding: 12px; text-align: left; color: var(--text-muted); font-weight: 600;">Categoría</th>
+                            <th style="padding: 12px; text-align: left; color: var(--text-muted); font-weight: 600;">PID</th>
+                            <th data-i18n="col_proc" style="padding: 12px; text-align: left; color: var(--text-muted); font-weight: 600;">Proceso</th>
+                            <th data-i18n="col_desc" style="padding: 12px; text-align: left; color: var(--text-muted); font-weight: 600;">Descripción</th>
+                        </tr>
+                    </thead>
+                    <tbody id="logs_tbody">
+                        <tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 40px 0;">Cargando...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div id="pagination_controls" style="display: flex; justify-content: space-between; align-items: center; margin-top: 16px;">
+                <button id="btn_prev_page" onclick="changePage(-1)" style="background: rgba(255,255,255,0.05); border: 1px solid var(--card-border); color: var(--text-main); padding: 8px 16px; border-radius: 6px; cursor: pointer;" disabled>Anterior</button>
+                <span id="page_info" style="color: var(--text-muted); font-size: 13px;">Página 1</span>
+                <button id="btn_next_page" onclick="changePage(1)" style="background: rgba(255,255,255,0.05); border: 1px solid var(--card-border); color: var(--text-main); padding: 8px 16px; border-radius: 6px; cursor: pointer;">Siguiente</button>
+            </div>
+        </div>
+    </div> <!-- End View: Logs -->
+    </div> <!-- End Container -->
+
+    <!-- Interpretation Dialog Modal -->
+    <div class="modal" id="interpret_modal">
+        <div class="modal-content">
+            <span class="close-btn" onclick="closeModal()">&times;</span>
+            <div class="modal-header">
+                <h3 id="modal_proc_title" data-i18n="modal_title">Interpretación de Conexión</h3>
+                <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;" id="modal_socket_title">PID: - | TCP | -</p>
+            </div>
+            <div class="modal-body">
+                <div class="interpret-banner" id="modal_banner">
+                    Evaluación de Riesgo: -
+                </div>
+                <div class="info-block" id="modal_ip_block">
+                    <h4 data-i18n="modal_ip_scope">Ámbito de la IP Destino</h4>
+                    <p>-</p>
+                </div>
+                <div class="info-block" id="modal_port_block">
+                    <h4 data-i18n="modal_port_purpose">Propósito del Puerto</h4>
+                    <p>-</p>
+                </div>
+                <div class="info-block" id="modal_status_block">
+                    <h4 data-i18n="modal_conn_state">Estado de la Conexión</h4>
+                    <p>-</p>
+                </div>
+                <div class="info-block block-danger" id="modal_danger_block">
+                    <h4 data-i18n="modal_sec_analysis">Análisis de Seguridad Detallado</h4>
+                    <p>-</p>
+                </div>
+                <div class="info-block" id="modal_recommendation_block">
+                    <h4 data-i18n="modal_recs">Recomendaciones</h4>
+                    <p>-</p>
+                </div>
+                <div class="info-block" id="modal_educational_block">
+                    <h4 data-i18n="modal_edu">Contexto Educativo</h4>
+                    <p>-</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for Detailed Log Info -->
+    <div id="log_modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.75); backdrop-filter:blur(6px); z-index:10000; align-items:center; justify-content:center;">
+        <div class="modal-content">
+            <span class="close-btn" onclick="closeLogModal()">&times;</span>
+            <div class="modal-header">
+                <h3 id="modal_cat" data-i18n="modal_title" style="font-size: 20px; color: var(--text-main);">Detalle de Evento</h3>
+                <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;" id="modal_meta">-</p>
+            </div>
+            <div class="modal-body">
+                <div class="info-block block-danger" id="modal_log_danger_block" style="border-left: 3px solid var(--danger); background: rgba(248, 113, 113, 0.05); padding: 12px 16px; border-radius: 8px; margin-bottom: 12px;">
+                    <h4 data-i18n="modal_desc" style="color: var(--danger); font-size: 12px; text-transform: uppercase; margin-bottom: 6px;">Descripción del Riesgo</h4>
+                    <p id="modal_desc_val" style="color: var(--text-main); font-size: 14px;">-</p>
+                </div>
+                <div class="info-block" id="modal_proc_block" style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--card-border); padding: 12px 16px; border-radius: 8px; margin-bottom: 12px;">
+                    <h4 data-i18n="modal_proc_details" style="color: var(--primary); font-size: 12px; text-transform: uppercase; margin-bottom: 6px;">Detalles del Proceso</h4>
+                    <p id="modal_proc_val" style="color: var(--text-main); font-size: 14px; white-space: pre-wrap;">-</p>
+                </div>
+                <div class="info-block" id="modal_raw_block" style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--card-border); padding: 12px 16px; border-radius: 8px; margin-bottom: 12px;">
+                    <h4 data-i18n="modal_raw_data" style="color: var(--primary); font-size: 12px; text-transform: uppercase; margin-bottom: 6px;">Datos Raw / Trazabilidad</h4>
+                    <pre style="font-family: monospace; font-size: 12px; color: var(--text-muted); white-space: pre-wrap;" id="modal_raw_val">-</pre>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/app.js?v=3.0"></script>
+
+    <!-- Interactive Explanation Modal Overlay -->
+    <div id="help_modal" onclick="if(event.target===this) closeHelpModal()" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.75); backdrop-filter: blur(6px); z-index: 10000; align-items: center; justify-content: center;">
+        <div style="background: #0f172a; border: 1px solid var(--primary); padding: 24px; border-radius: 16px; max-width: 500px; width: 90%; position: relative; box-shadow: 0 20px 50px rgba(0,0,0,0.5);">
+            <button onclick="closeHelpModal()" style="position: absolute; top: 12px; right: 12px; background: none; border: none; color: var(--text-muted); font-size: 20px; cursor: pointer; font-weight: bold; line-height: 1;">&times;</button>
+            <h3 id="help_title" style="color: var(--primary); margin-top: 0; margin-bottom: 12px; font-size: 16px; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px;">Módulo</h3>
+            <p id="help_desc" style="color: var(--text-main); font-size: 13px; line-height: 1.6; margin-bottom: 20px; text-align: justify;">Explicación del módulo.</p>
+            <div style="text-align: right;">
+                <button onclick="closeHelpModal()" style="background: var(--primary); border: none; color: #fff; padding: 6px 16px; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer;">Entendido</button>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

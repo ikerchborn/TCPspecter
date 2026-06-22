@@ -166,6 +166,9 @@ def get_active_rules() -> list[dict]:
     return get_blocked_ips()
 
 
+import logging
+log = logging.getLogger(__name__)
+
 def add_custom_rule(action: str, src_ip: str, dst_ip: str, port: int, protocol: str) -> bool:
     """
     Creates a granular firewall rule mapping inputs safely to iptables.
@@ -186,6 +189,18 @@ def add_custom_rule(action: str, src_ip: str, dst_ip: str, port: int, protocol: 
     safe_src = validate_ip(src_ip) if src_ip and src_ip.strip() else None
     safe_dst = validate_ip(dst_ip) if dst_ip and dst_ip.strip() else None
     
+    # 1. Prevent completely empty rules that block/allow everything everywhere
+    if not safe_src and not safe_dst and not port:
+        log.warning("Rejected firewall rule with completely empty criteria.")
+        return False
+
+    # 2. Prevent blocking localhost
+    if action in ("DROP", "REJECT"):
+        for ip_check in (safe_src, safe_dst):
+            if ip_check and (ip_check.startswith("127.") or ip_check == "::1" or ip_check.lower() == "localhost"):
+                log.warning("Attempted to block localhost. Rejected.")
+                return False
+    
     port_num = None
     if port:
         try:
@@ -196,30 +211,44 @@ def add_custom_rule(action: str, src_ip: str, dst_ip: str, port: int, protocol: 
             pass
 
     backend = detect_backend()
-    if backend != "iptables":
-        # Can be adapted for UFW if needed
+    if backend == "none":
+        log.error("Cannot add custom rule: no supported backend found (neither iptables nor ufw).")
         return False
 
-    cmd = ["iptables", "-A", "INPUT"]
-    
-    if protocol != "all":
-        cmd.extend(["-p", protocol])
-        
-    if safe_src:
-        cmd.extend(["-s", safe_src])
-        
-    if safe_dst:
-        cmd.extend(["-d", safe_dst])
-        
-    if port_num is not None and protocol in ("tcp", "udp"):
-        cmd.extend(["--dport", str(port_num)])
-        
-    cmd.extend(["-j", action])
+    cmd = []
+    if backend == "iptables":
+        cmd = ["sudo", "iptables", "-A", "INPUT"]
+        if protocol != "all":
+            cmd.extend(["-p", protocol])
+        if safe_src:
+            cmd.extend(["-s", safe_src])
+        if safe_dst:
+            cmd.extend(["-d", safe_dst])
+        if port_num is not None and protocol in ("tcp", "udp"):
+            cmd.extend(["--dport", str(port_num)])
+        cmd.extend(["-j", action])
+    elif backend == "ufw":
+        # UFW syntax: sudo ufw allow/deny [proto <protocol>] [from <address> [port <port>]] [to <address> [port <port>]]
+        action_ufw = "allow" if action == "ACCEPT" else "deny"
+        cmd = ["sudo", "ufw", action_ufw]
+        if safe_src:
+            cmd.extend(["from", safe_src])
+        if safe_dst:
+            cmd.extend(["to", safe_dst])
+        if port_num is not None:
+            cmd.extend(["port", str(port_num)])
+        if protocol != "all":
+            cmd.extend(["proto", protocol])
 
     try:
-        subprocess.run(cmd, check=True, timeout=5.0, capture_output=True)
+        res = subprocess.run(cmd, check=True, timeout=5.0, capture_output=True, text=True)
+        log.info(f"Firewall rule added: {' '.join(cmd)}")
         return True
-    except Exception:
+    except subprocess.CalledProcessError as e:
+        log.error(f"Error executing {backend}: {e.stderr}")
+        return False
+    except Exception as e:
+        log.error(f"Unexpected error executing {backend}: {e}")
         return False
 
 

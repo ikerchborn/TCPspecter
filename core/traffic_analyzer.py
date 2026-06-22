@@ -80,6 +80,8 @@ _stats: dict[str, int] = {
 
 # Rolling entropy history — deque(maxlen) hace trim O(1) automáticamente
 _entropy_history: deque[float] = deque(maxlen=100)
+# Timed entropy history: stores (iso_timestamp, entropy_value) for frontend charts
+_entropy_timed: deque[tuple] = deque(maxlen=30)
 
 # Flow sampler: OrderedDict para LRU eviction O(1) vía popitem(last=False)
 # Key: (src_ip, sport, dst_ip, dport) → bytes ya muestreados
@@ -268,6 +270,13 @@ def _check_port_scan(src_ip: str, dst_ip: str, dst_port: int) -> None:
     now = time.monotonic()
     key = (src_ip, dst_ip)
     with _lock:
+        # Prevent unbounded growth by periodically cleaning stale keys
+        if len(_scan_tracker) > 2000:
+            stale_keys = [k for k, v in _scan_tracker.items() if now - v[1] > 60.0]
+            for k in stale_keys:
+                if k != key:
+                    del _scan_tracker[k]
+
         if key not in _scan_tracker:
             _scan_tracker[key] = (set(), now)
         
@@ -303,6 +312,13 @@ def _process_dns(packet) -> None:
     if parent:
         now = time.monotonic()  # monotonic: no salta por ajustes de NTP/reloj
         with _lock:
+            # Prevent unbounded growth
+            if len(_dns_tracker) > 2000:
+                stale = [d for d, q in _dns_tracker.items() if not q or now - q[-1] > 60.0]
+                for d in stale:
+                    if d != parent:
+                        del _dns_tracker[d]
+
             tracker = _dns_tracker.setdefault(parent, deque())
             tracker.append(now)
             # Trim O(1) por la izquierda: eliminamos entradas fuera de ventana
@@ -355,6 +371,8 @@ def _process_tcp(packet, src_ip: str, dst_ip: str) -> None:
 
     with _lock:
         _entropy_history.append(ent)  # O(1) — deque(maxlen=100) hace trim automático
+        import datetime as _dt
+        _entropy_timed.append((_dt.datetime.now().strftime("%H:%M:%S"), round(ent, 3)))
 
     if ent > _HIGH_ENTROPY_THRESHOLD:
         _publish_dlp_alert(
@@ -492,9 +510,15 @@ def get_live_metrics() -> dict:
             sum(_entropy_history) / len(_entropy_history)
             if _entropy_history else 0.0
         )
+        # Export timed series: list of [label, value] pairs
+        timed = list(_entropy_timed)
         return {
             "stats": dict(_stats),
             "avg_entropy": round(avg_entropy, 2),
+            "entropy_history": {
+                "labels": [t[0] for t in timed],
+                "values": [t[1] for t in timed],
+            },
         }
 
 # backward compat alias

@@ -109645,5 +109645,167 @@
       "name": "https",
       "pid": 57490
     }
+  },
+  {
+    "@timestamp": "2026-06-21T22:33:33Z",
+    "ecs": {
+      "version": "1.12.0"
+    },
+    "event": {
+      "kind": "alert",
+      "category": [
+        "intrusion_detection"
+      ],
+      "type": [
+        "indicator"
+      ],
+      "action": "detected",
+      "severity": 70,
+      "risk_score": 73,
+      "provider": "TCPspecter",
+      "dataset": "tcpspecter.security",
+      "module": "TÚNEL DNS"
+    },
+    "host": {
+      "name": "parrot",
+      "os": {
+        "family": "linux",
+        "platform": "linux"
+      }
+    },
+    "message": "Inundación DNS a 'ip-api.com': 21 queries en 10s (posible túnel)",
+    "tcpspecter": {
+      "engine": "dns",
+      "status": "DETECTED",
+      "severity": "HIGH",
+      "category": "TÚNEL DNS"
+    },
+    "source": {
+      "ip": "ip-api.com."
+    },
+    "destination": {
+      "ip": "port/53"
+    },
+    "threat": {
+      "framework": "MITRE ATT&CK",
+      "technique": {
+        "id": "T1071.004",
+        "name": "DNS (Application Layer Protocol)"
+      },
+      "tactic": {
+        "name": "Command and Control"
+      }
+    },
+    "compliance": {
+      "nist": [
+        "PR.PT-4"
+      ],
+      "iso": [
+        "A.13.1.1"
+      ]
+    }
+  },
+  {
+    "@timestamp": "2026-06-21T22:33:35Z",
+    "ecs": {
+      "version": "1.12.0"
+    },
+    "event": {
+      "kind": "alert",
+      "category": [
+        "intrusion_detection"
+      ],
+      "type": [
+        "indicator"
+      ],
+      "action": "detected",
+      "severity": 70,
+      "risk_score": 73,
+      "provider": "TCPspecter",
+      "dataset": "tcpspecter.security",
+      "module": "Escaneo de Puertos"
+    },
+    "host": {
+      "name": "parrot",
+      "os": {
+        "family": "linux",
+        "platform": "linux"
+      }
+    },
+    "message": "Escaneo de puertos detectado desde 208.95.112.1 hacia 192.168.18.3 (15 puertos en <10s)",
+    "tcpspecter": {
+      "engine": "ndr",
+      "status": "DETECTED",
+      "severity": "HIGH",
+      "category": "Escaneo de Puertos"
+    },
+    "source": {
+      "ip": "208.95.112.1"
+    },
+    "destination": {
+      "ip": "192.168.18.3"
+    },
+    "threat": {
+      "framework": "MITRE ATT&CK",
+      "technique": {
+        "id": "T1046",
+        "name": "Network Service Discovery"
+      },
+      "tactic": {
+        "name": "Discovery"
+      }
+    },
+    "compliance": {
+      "nist": [
+        "DE.AE-2"
+      ],
+      "iso": [
+        "A.13.1.1"
+      ]
+    }
+  },
+  {
+    "@timestamp": "2026-06-21T22:33:35Z",
+    "ecs": {
+      "version": "1.12.0"
+    },
+    "event": {
+      "kind": "alert",
+      "category": [
+        "intrusion_detection"
+      ],
+      "type": [
+        "indicator"
+      ],
+      "action": "detected",
+      "severity": 70,
+      "risk_score": 73,
+      "provider": "TCPspecter",
+      "dataset": "tcpspecter.security",
+      "module": "Bloqueo de Firewall"
+    },
+    "host": {
+      "name": "parrot",
+      "os": {
+        "family": "linux",
+        "platform": "linux"
+      }
+    },
+    "message": "Escaneo masivo detectado desde 208.95.112.1. Tráfico redirigido al Tarpit en puerto 2222.",
+    "tcpspecter": {
+      "engine": "response",
+      "status": "DETECTED",
+      "severity": "HIGH",
+      "category": "Bloqueo de Firewall"
+    },
+    "source": {
+      "ip": "208.95.112.1"
+    },
+    "compliance": {
+      "tags": [
+        "NIST-IR-8011",
+        "ISO-27001-A.13.1"
+      ]
+    }
   }
 ]

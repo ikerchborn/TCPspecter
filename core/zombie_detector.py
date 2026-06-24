@@ -32,6 +32,10 @@ MITRE_MAP = {
     "Regular C2 Connection":  {"id": "T1571",     "name": "Non-Standard Port",                  "tactic": "Command and Control"},
     "IDS/Sniffer":            {"id": "T1040",     "name": "Network Sniffing",                   "tactic": "Discovery"},
     "Fileless Memory":        {"id": "T1055",     "name": "Process Injection",                  "tactic": "Defense Evasion"},
+    "Threat Port Match":      {"id": "T1071",     "name": "Application Layer Protocol",         "tactic": "Command and Control"},
+    "Tor Exit Node":          {"id": "T1090.003", "name": "Multi-hop Proxy",                    "tactic": "Command and Control"},
+    "Sinkholed Infrastructure": {"id": "T1071",   "name": "Application Layer Protocol",         "tactic": "Command and Control"},
+    "Custom Blacklist Hit":   {"id": "T1071",     "name": "Application Layer Protocol",         "tactic": "Command and Control"},
 }
 
 NIST_MAP = {
@@ -50,6 +54,10 @@ NIST_MAP = {
     "System Persistence":     ("DE.CM-1",),
     "Regular C2 Connection":  ("DE.AE-2",),
     "Fileless Memory":        ("DE.CM-7",),
+    "Threat Port Match":      ("DE.AE-2",),
+    "Tor Exit Node":          ("DE.AE-2",),
+    "Sinkholed Infrastructure": ("DE.AE-2",),
+    "Custom Blacklist Hit":   ("DE.AE-2",),
 }
 
 ISO_MAP = {
@@ -68,9 +76,77 @@ ISO_MAP = {
     "System Persistence":     ("A.12.4.1",),
     "Regular C2 Connection":  ("A.13.1.1",),
     "Fileless Memory":        ("A.12.6.1",),
+    "Threat Port Match":      ("A.13.1.1",),
+    "Tor Exit Node":          ("A.13.1.1",),
+    "Sinkholed Infrastructure": ("A.13.1.1",),
+    "Custom Blacklist Hit":   ("A.13.1.1",),
 }
 
-# Ports commonly used by known C2 servers, botnets, shells, and miners
+_INTEL_SEVERITY = {"high": "CRITICAL", "medium": "HIGH", "low": "MEDIUM", "info": "LOW"}
+
+
+def _apply_intelligence_findings(
+    findings: list,
+    rip: str,
+    rport: int,
+    pid: int,
+    proc_name: str,
+) -> None:
+    """Cross-reference outbound connections against local threat intelligence feeds."""
+    try:
+        from core.intelligence_engine import get_engine
+        engine = get_engine()
+    except Exception:
+        return
+
+    if not engine.enabled:
+        if rport in C2_PORTS:
+            findings.append(_enrich_finding({
+                "category": "Suspicious C2 Port",
+                "severity": "CRITICAL",
+                "description": f"Connected to suspicious/C2 port ({rport}) on external IP {rip}",
+                "pid": pid,
+                "proc_name": proc_name,
+            }))
+        return
+
+    ip_match = engine.match_ip(rip)
+    if ip_match:
+        findings.append(_enrich_finding({
+            "category": ip_match.label if ip_match.label in MITRE_MAP else (
+                "Tor Exit Node" if ip_match.category == "tor" else
+                "Sinkholed Infrastructure" if ip_match.category == "sinkhole" else
+                "Custom Blacklist Hit" if ip_match.category == "blacklist" else
+                ip_match.label
+            ),
+            "severity": ip_match.severity,
+            "description": ip_match.description,
+            "pid": pid,
+            "proc_name": proc_name,
+        }))
+
+    port_intel = engine.match_port(rport)
+    if port_intel:
+        findings.append(_enrich_finding({
+            "category": "Threat Port Match",
+            "severity": _INTEL_SEVERITY.get(port_intel.confidence, "HIGH"),
+            "description": (
+                f"Connected to flagged port {rport} ({port_intel.label}) on {rip}"
+                + (f" — {port_intel.description}" if port_intel.description else "")
+            ),
+            "pid": pid,
+            "proc_name": proc_name,
+        }))
+    elif rport in C2_PORTS:
+        findings.append(_enrich_finding({
+            "category": "Suspicious C2 Port",
+            "severity": "CRITICAL",
+            "description": f"Connected to suspicious/C2 port ({rport}) on external IP {rip}",
+            "pid": pid,
+            "proc_name": proc_name,
+        }))
+
+# Ports commonly used by known C2 servers, botnets, shells, and miners (fallback set)
 C2_PORTS = {
     6667, 6668, 6669, 7000,   # IRC Botnets
     9001, 9050, 9051,         # Tor / Proxy
@@ -566,17 +642,10 @@ def analyze_zombie_status(force=False) -> dict:
                     # Track external outbound destinations
                     if not is_private_ip(rip) and conn.status == "ESTABLISHED":
                         outbound_ips.add(rip)
-                        # Record sample for beaconing analysis
                         _record_beacon_sample(pid, rip)
-                    
-                    if rport in C2_PORTS and not is_private_ip(rip):
-                        findings.append(_enrich_finding({
-                            "category": "Suspicious C2 Port",
-                            "severity": "CRITICAL",
-                            "description": f"Conectado a puerto sospechoso/C2 ({rport}) en IP externa {rip}",
-                            "pid": pid,
-                            "proc_name": proc_name
-                        }))
+
+                    if raddr and not is_private_ip(rip) and conn.status == "ESTABLISHED":
+                        _apply_intelligence_findings(findings, rip, rport, pid, proc_name)
                 
                 # Check for suspicious listening on all interfaces
                 if conn.status == "LISTEN" and conn.laddr:

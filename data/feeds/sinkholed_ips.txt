@@ -1,0 +1,7 @@
+# One IPv4/IPv6 address or CIDR per line. Lines starting with # are ignored.
+# Sinkholed addresses indicate prior malware infrastructure taken over by researchers.
+185.220.101.1
+185.220.101.2
+185.220.101.3
+192.0.2.100
+198.51.100.50

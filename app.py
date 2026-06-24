@@ -38,6 +38,9 @@ class TCPspecterApp(App):
 
 if __name__ == "__main__":
     from core.response_engine import start_engine
+    from core.intelligence_engine import initialize_intelligence
+
+    initialize_intelligence()
     start_engine()
     
     app = TCPspecterApp()

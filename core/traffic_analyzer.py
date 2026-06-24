@@ -295,6 +295,21 @@ def _check_port_scan(src_ip: str, dst_ip: str, dst_port: int) -> None:
 
 # ─── Procesamiento de paquetes ────────────────────────────────────────────────
 
+def _check_intel_ip(ip_str: str) -> None:
+    """Publish alert when packet traffic involves a flagged remote IP."""
+    try:
+        from core.geoip import is_private_ip
+        from core.intelligence_engine import get_engine
+        if is_private_ip(ip_str):
+            return
+        engine = get_engine()
+        match = engine.match_ip(ip_str)
+        if match:
+            engine.publish_threat_match(match, source_ip=ip_str, dest_ip="")
+    except Exception:
+        log.debug("Intelligence IP check skipped", exc_info=True)
+
+
 def _process_dns(packet) -> None:
     """Analiza un paquete DNS en busca de DGA y tunneling."""
     if not packet.haslayer(DNSQR) or packet[DNS].qr != 0:
@@ -305,7 +320,20 @@ def _process_dns(packet) -> None:
 
     # 1. DGA: any() hace short-circuit en el primer subdomain positivo
     if any(is_dga_domain(sub) for sub in qname.split(".")[:-1]):
-        _publish_dns_alert("DGA", qname, f"Posible dominio DGA detectado: {qname}")
+        _publish_dns_alert("DGA", qname, f"Possible DGA domain detected: {qname}")
+
+    # 1b. Threat intelligence domain correlation
+    try:
+        from core.intelligence_engine import get_engine
+        domain_match = get_engine().match_domain(qname)
+        if domain_match:
+            get_engine().publish_threat_match(
+                domain_match,
+                source_ip=qname,
+                dest_ip="port/53",
+            )
+    except Exception:
+        log.debug("Intelligence domain check skipped", exc_info=True)
 
     # 2. DNS Tunneling por frecuencia de consultas al mismo dominio raíz
     parent = get_parent_domain(qname)
@@ -438,6 +466,7 @@ def packet_callback(packet) -> None:
                     is_syn = 'S' in str(tcp.flags)
             if is_syn:
                 _check_port_scan(src_ip, dst_ip, tcp.dport)
+            _check_intel_ip(dst_ip)
             _process_tcp(packet, src_ip, dst_ip)
 
     except Exception:
@@ -496,6 +525,11 @@ def stop_analyzer() -> bool:
     """Señaliza al sniffer que pare. Non-blocking."""
     _stop_event.set()
     return True
+
+
+def is_analyzer_running() -> bool:
+    """True if the Scapy sniffer thread is alive."""
+    return _sniff_thread is not None and _sniff_thread.is_alive()
 
 
 def get_live_metrics() -> dict:

@@ -42,6 +42,7 @@ let protoChart = null;
                 echarts.registerMap('world', worldJson);
                 
                 const chartDom = document.getElementById('globeChart');
+                if (!chartDom) return;
                 globeChart = echarts.init(chartDom);
                 
                 const option = {
@@ -113,7 +114,8 @@ let protoChart = null;
 
         function initWebSocket() {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${window.location.host}/api/ws`;
+            const lang = localStorage.getItem('language') || 'en';
+            const wsUrl = `${protocol}//${window.location.host}/api/ws?lang=${encodeURIComponent(lang)}`;
             const ws = new WebSocket(wsUrl);
             
             ws.onmessage = (event) => {
@@ -312,6 +314,9 @@ let protoChart = null;
                     const totalGb = (data.total_ram / (1024 * 1024 * 1024)).toFixed(2);
                     ramEl.innerText = `${data.ram.toFixed(1)}% (${usedGb} GB / ${totalGb} GB)`;
                 }
+                if (typeof data.security?.enabled === 'boolean') {
+                    updateSecurityToggleBtn(data.security.enabled);
+                }
             } catch (err) {
                 console.error('Header stats update failed:', err);
             }
@@ -332,6 +337,13 @@ let protoChart = null;
                 console.error('Firewall panels update failed:', err);
             }
 
+            // Threat intelligence — dashboard and intelligence routes
+            try {
+                updateIntelligencePanels(data);
+            } catch (err) {
+                console.error('Intelligence panels update failed:', err);
+            }
+
             // Map + connections table — dashboard only
             if (isDashboardRoute()) {
                 try {
@@ -350,11 +362,17 @@ let protoChart = null;
 
                 riskScoreEl.innerText = data.security?.score ?? 0;
                 
-                // Color mapping
                 let riskColor = '#34d399';
                 let riskClass = 'sev-bajo';
                 const score = data.security?.score ?? 0;
-                if (score >= 60) {
+                const riskLevel = data.security?.risk_level ?? '-';
+                const analyticsOff = data.security?.enabled === false || riskLevel === 'DESACTIVADO' || riskLevel === 'DISABLED';
+
+                if (analyticsOff) {
+                    riskColor = '#888888';
+                    riskClass = 'sev-medio';
+                    riskScoreEl.innerText = '—';
+                } else if (score >= 60) {
                     riskColor = '#f87171';
                     riskClass = 'sev-critico';
                 } else if (score >= 35) {
@@ -364,11 +382,13 @@ let protoChart = null;
                     riskColor = '#4a7a9d';
                     riskClass = 'sev-medio';
                 }
-                circle.style.background = `conic-gradient(${riskColor} ${score}%, #1e293b 0%)`;
+                circle.style.background = analyticsOff
+                    ? `conic-gradient(${riskColor} 100%, #1e293b 0%)`
+                    : `conic-gradient(${riskColor} ${score}%, #1e293b 0%)`;
                 
                 const riskLevelEl = document.getElementById('risk_level');
                 if (riskLevelEl) {
-                    riskLevelEl.innerText = data.security?.risk_level ?? '-';
+                    riskLevelEl.innerText = riskLevel;
                     riskLevelEl.className = `severity-badge ${riskClass}`;
                 }
 
@@ -384,15 +404,16 @@ let protoChart = null;
                 } else {
                     alertsList.innerHTML = findings.map(f => {
                         let fclass = 'sev-bajo';
-                        if (f.severity === 'CRITICAL') fclass = 'sev-critico';
-                        else if (f.severity === 'HIGH') fclass = 'sev-alto';
-                        else if (f.severity === 'MEDIUM') fclass = 'sev-medio';
+                        let borderColor = '#34d399';
+                        if (f.severity === 'CRITICAL') { fclass = 'sev-critico'; borderColor = '#f87171'; }
+                        else if (f.severity === 'HIGH') { fclass = 'sev-alto'; borderColor = '#fbbf24'; }
+                        else if (f.severity === 'MEDIUM') { fclass = 'sev-medio'; borderColor = '#4a7a9d'; }
                         
                         const pidText = f.pid ? `PID ${escapeHTML(f.pid)}` : '';
                         const nameText = f.proc_name ? `(${escapeHTML(f.proc_name)})` : '';
 
                         return `
-                            <div style="background: rgba(255,255,255,0.02); margin-bottom: 8px; padding: 10px; border-radius: 8px; border-left: 3px solid ${riskColor};">
+                            <div style="background: rgba(255,255,255,0.02); margin-bottom: 8px; padding: 10px; border-radius: 8px; border-left: 3px solid ${borderColor};">
                                 <div style="display:flex; justify-content:space-between; margin-bottom: 4px;">
                                     <span class="severity-badge ${fclass}" style="padding:1px 6px; font-size:10px;">${escapeHTML(f.severity)}</span>
                                     <span style="font-size:11px; color:var(--text-muted);">${pidText} ${nameText}</span>
@@ -486,6 +507,12 @@ let protoChart = null;
                 const scapyEntropyEl = document.getElementById('scapy_avg_entropy');
                 const dnsDlpAlerts = document.getElementById('dns_dlp_alerts');
                 if (scapyCountEl && scapyEntropyEl && dnsDlpAlerts && data.scapy) {
+                    const snifferUp = data.scapy.sniffer_running !== false;
+                    if (!snifferUp && (data.scapy.stats?.packet_count ?? 0) === 0) {
+                        scapyCountEl.innerText = '—';
+                        scapyEntropyEl.innerText = '—';
+                        dnsDlpAlerts.innerHTML = `<div style="color: var(--warning); font-style: italic; text-align: center; margin-top: 20px; font-size: 12px;">Sniffer Scapy inactivo. Ejecuta TCPspecter con sudo o CAP_NET_RAW para captura en vivo.</div>`;
+                    } else {
                     scapyCountEl.innerText = data.scapy.stats?.packet_count ?? 0;
                     scapyEntropyEl.innerText = (data.scapy.avg_entropy ?? 0).toFixed(2);
 
@@ -520,8 +547,126 @@ let protoChart = null;
                             `;
                         }).join('');
                     }
+                    }
                 }
         }
+
+        function renderIntelAlertItem(alert) {
+            let color = '#fbbf24';
+            if (alert.severity === 'CRITICAL') color = '#f87171';
+            else if (alert.severity === 'HIGH') color = '#fb923c';
+            return `
+                <div style="background: rgba(255,255,255,0.02); padding: 8px; border-radius: 6px; border-left: 3px solid ${color}; font-size: 11px; margin-bottom: 8px;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
+                        <span style="color: ${color}; font-weight: 600; text-transform: uppercase;">${escapeHTML(alert.category || 'INTEL')}</span>
+                        <span style="color: var(--text-muted);">${escapeHTML(alert.timestamp || '')}</span>
+                    </div>
+                    <div style="color: var(--text-main); font-size: 12px;">${escapeHTML(alert.description || '')}</div>
+                </div>
+            `;
+        }
+
+        function updateIntelligencePanels(data) {
+            const intel = data.intelligence;
+            if (!intel) return;
+
+            const feedsLoaded = (intel.feeds || []).filter(f => f.loaded).length;
+            const noMatchHtml = `<div style="color: var(--text-muted); font-style: italic; text-align: center; margin-top: 20px; font-size: 12px;">${translations[localStorage.getItem('language') || 'en']['intel_no_matches'] || 'No matches yet.'}</div>`;
+            const alerts = intel.live_alerts || intel.recent_matches || [];
+
+            const totalEl = document.getElementById('intel_total_entries');
+            const feedsEl = document.getElementById('intel_feeds_loaded');
+            const matchEl = document.getElementById('intel_match_count');
+            const statusEl = document.getElementById('intel_status_badge');
+            const recentEl = document.getElementById('intel_recent_matches');
+
+            if (totalEl) totalEl.innerText = intel.total_entries ?? 0;
+            if (feedsEl) feedsEl.innerText = feedsLoaded;
+            if (matchEl) matchEl.innerText = intel.match_count ?? 0;
+            if (statusEl) {
+                statusEl.innerText = intel.enabled ? 'ACTIVE' : 'DISABLED';
+                statusEl.style.color = intel.enabled ? '#34d399' : '#888888';
+            }
+            if (recentEl) {
+                recentEl.innerHTML = alerts.length === 0
+                    ? noMatchHtml
+                    : alerts.slice(-5).reverse().map(renderIntelAlertItem).join('');
+            }
+
+            const pageTotal = document.getElementById('intel_page_total');
+            const pageMatches = document.getElementById('intel_page_matches');
+            const pageReload = document.getElementById('intel_page_reload');
+            const feedsTbody = document.getElementById('intel_feeds_tbody');
+            const alertsList = document.getElementById('intel_alerts_list');
+            const toggleBtn = document.getElementById('intel_toggle_btn');
+
+            if (pageTotal) pageTotal.innerText = intel.total_entries ?? 0;
+            if (pageMatches) pageMatches.innerText = intel.match_count ?? 0;
+            if (pageReload) pageReload.innerText = intel.last_reload || '—';
+
+            if (feedsTbody) {
+                const feeds = intel.feeds || [];
+                if (feeds.length === 0) {
+                    feedsTbody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:20px 0;">No feeds configured</td></tr>`;
+                } else {
+                    feedsTbody.innerHTML = feeds.map(f => `
+                        <tr style="border-bottom: 1px solid var(--card-border);">
+                            <td style="padding: 10px; color: var(--text-main);">${escapeHTML(f.name)}</td>
+                            <td style="padding: 10px;">
+                                <span class="severity-badge ${f.loaded ? 'sev-bajo' : 'sev-alto'}">${f.loaded ? 'LOADED' : 'MISSING'}</span>
+                            </td>
+                            <td style="padding: 10px; color: var(--text-main);">${f.entry_count ?? 0}</td>
+                            <td style="padding: 10px; color: var(--text-muted); font-size: 12px;">${escapeHTML(f.error || '—')}</td>
+                        </tr>
+                    `).join('');
+                }
+            }
+
+            if (alertsList) {
+                alertsList.innerHTML = alerts.length === 0
+                    ? noMatchHtml
+                    : [...alerts].reverse().map(renderIntelAlertItem).join('');
+            }
+
+            if (toggleBtn) {
+                const lang = localStorage.getItem('language') || 'en';
+                toggleBtn.innerHTML = intel.enabled
+                    ? (translations[lang]['intel_btn_active'] || '● ENGINE ACTIVE')
+                    : (translations[lang]['intel_btn_inactive'] || '○ ENGINE DISABLED');
+                toggleBtn.style.color = intel.enabled ? '#34d399' : '#888888';
+                toggleBtn.style.borderColor = intel.enabled ? '#34d399' : '#888888';
+                toggleBtn.style.background = intel.enabled ? 'rgba(52,211,153,0.15)' : 'rgba(255,255,255,0.05)';
+            }
+        }
+
+        async function toggleIntelligence() {
+            try {
+                const res = await fetch('/api/intelligence/toggle', {
+                    method: 'POST',
+                    headers: { 'X-CSRF-Token': window.csrfToken || '' }
+                });
+                if (!res.ok) throw new Error('Toggle failed');
+                await fetchAndUpdateNow();
+            } catch (err) {
+                console.error('Intelligence toggle error:', err);
+            }
+        }
+
+        async function reloadIntelligenceFeeds() {
+            try {
+                const res = await fetch('/api/intelligence/reload', {
+                    method: 'POST',
+                    headers: { 'X-CSRF-Token': window.csrfToken || '' }
+                });
+                if (!res.ok) throw new Error('Reload failed');
+                await fetchAndUpdateNow();
+            } catch (err) {
+                console.error('Intelligence reload error:', err);
+            }
+        }
+
+        window.toggleIntelligence = toggleIntelligence;
+        window.reloadIntelligenceFeeds = reloadIntelligenceFeeds;
 
         async function updateFirewallPanels(data) {
                 const snortBadge = document.getElementById('snort_badge');
@@ -563,7 +708,7 @@ let protoChart = null;
                 const blockedIps = data.firewall?.blocked_ips || [];
                 if (fwTbody) {
                     if (blockedIps.length === 0) {
-                        fwTbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--text-muted); padding: 20px 0; border-bottom: 1px solid var(--card-border);">Ninguna política activa encontrada.</td></tr>`;
+                        fwTbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--text-muted); padding: 20px 0; border-bottom: 1px solid var(--card-border);">Ninguna IP bloqueada actualmente.</td></tr>`;
                     } else {
                         fwTbody.innerHTML = blockedIps.map(rule => {
                             return `
@@ -589,45 +734,32 @@ let protoChart = null;
                 filterTable();
 
                 const uniqueRemoteIPs = [...new Set(connections.map(c => c.raddr_ip).filter(ip => ip && ip !== '-' && ip !== '0.0.0.0' && ip !== '127.0.0.1'))];
-                const fetchPromises = [];
 
+                // Phase 1: fetch traceroutes
+                await Promise.all(uniqueRemoteIPs.map(ip => {
+                    if (tracerouteCache[ip] && tracerouteCache[ip] !== 'fetching') return Promise.resolve();
+                    tracerouteCache[ip] = 'fetching';
+                    return fetch(`/api/traceroute?ip=${encodeURIComponent(ip)}`)
+                        .then(r => r.json())
+                        .then(hops => { tracerouteCache[ip] = hops || [ip]; })
+                        .catch(() => { tracerouteCache[ip] = [ip]; });
+                }));
+
+                // Phase 2: fetch geo for destinations and hops
+                const ipsNeedingGeo = new Set(uniqueRemoteIPs);
                 uniqueRemoteIPs.forEach(ip => {
-                    if (!tracerouteCache[ip]) {
-                        tracerouteCache[ip] = 'fetching';
-                        fetchPromises.push(
-                            fetch(`/api/traceroute?ip=${ip}`).then(r => r.json()).then(hops => {
-                                tracerouteCache[ip] = hops || [];
-                                (hops || []).forEach(hop_ip => {
-                                    if (!geoIpCache[hop_ip]) {
-                                        geoIpCache[hop_ip] = 'fetching';
-                                        fetchPromises.push(
-                                            fetch(`/api/geoip?ip=${hop_ip}`).then(r => r.json()).then(geo => {
-                                                geoIpCache[hop_ip] = (geo && !geo.is_local) ? geo : 'local';
-                                            }).catch(() => geoIpCache[hop_ip] = 'local')
-                                        );
-                                    }
-                                });
-                            }).catch(() => {
-                                tracerouteCache[ip] = [ip];
-                            })
-                        );
-                    }
-
-                    if (!geoIpCache[ip]) {
-                        geoIpCache[ip] = 'fetching';
-                        fetchPromises.push(
-                            fetch(`/api/geoip?ip=${ip}`).then(r => r.json()).then(geo => {
-                                geoIpCache[ip] = (geo && !geo.is_local) ? geo : 'local';
-                            }).catch(() => {
-                                geoIpCache[ip] = 'local';
-                            })
-                        );
-                    }
+                    const hops = tracerouteCache[ip];
+                    if (Array.isArray(hops)) hops.forEach(h => ipsNeedingGeo.add(h));
                 });
 
-                if (fetchPromises.length > 0) {
-                    await Promise.all(fetchPromises);
-                }
+                await Promise.all([...ipsNeedingGeo].map(ip => {
+                    if (geoIpCache[ip] && geoIpCache[ip] !== 'fetching') return Promise.resolve();
+                    geoIpCache[ip] = 'fetching';
+                    return fetch(`/api/geoip?ip=${encodeURIComponent(ip)}`)
+                        .then(r => r.json())
+                        .then(geo => { geoIpCache[ip] = (geo && !geo.is_local) ? geo : 'local'; })
+                        .catch(() => { geoIpCache[ip] = 'local'; });
+                }));
 
                 if (!globeChart || !localGeo) return;
 
@@ -789,49 +921,69 @@ let protoChart = null;
                 conn = connDataObj;
             }
             const lang = localStorage.getItem('language') || 'en';
+            const interp = conn.interpretation || {};
 
             if (lang === 'es') {
-                document.getElementById('modal_proc_title').innerText = `Interpretación de '${conn.name}'`;
-                document.getElementById('modal_socket_title').innerText = `PID: ${conn.pid} | Protocolo: ${conn.proto} | IP Destino: ${conn.raddr_ip}:${conn.raddr_port}`;
+                document.getElementById('modal_proc_title').innerText = `Interpretación de '${conn.name || '-'}'`;
+                document.getElementById('modal_socket_title').innerText = `PID: ${conn.pid || '-'} | Protocolo: ${conn.proto || '-'} | IP Destino: ${conn.raddr_ip}:${conn.raddr_port}`;
             } else {
-                document.getElementById('modal_proc_title').innerText = `Interpretation of '${conn.name}'`;
-                document.getElementById('modal_socket_title').innerText = `PID: ${conn.pid} | Protocol: ${conn.proto} | Destination IP: ${conn.raddr_ip}:${conn.raddr_port}`;
+                document.getElementById('modal_proc_title').innerText = `Interpretation of '${conn.name || '-'}'`;
+                document.getElementById('modal_socket_title').innerText = `PID: ${conn.pid || '-'} | Protocol: ${conn.proto || '-'} | Destination IP: ${conn.raddr_ip}:${conn.raddr_port}`;
             }
             
             const banner = document.getElementById('modal_banner');
+            const assessment = interp.assessment || (lang === 'es' ? 'Sin evaluación' : 'No assessment');
             if (lang === 'es') {
-                banner.innerText = `Evaluación: ${conn.interpretation.assessment}`;
+                banner.innerText = `Evaluación: ${assessment}`;
             } else {
-                banner.innerText = `Assessment: ${conn.interpretation.assessment}`;
+                banner.innerText = `Assessment: ${assessment}`;
             }
             
             let bannerBg = 'rgba(52, 211, 153, 0.15)';
             let bannerColor = 'var(--success)';
-            if (conn.interpretation.assessment.includes('CRÍTICO') || conn.interpretation.assessment.includes('CRITICAL')) {
+            if (assessment.includes('CRÍTICO') || assessment.includes('CRITICAL')) {
                 bannerBg = 'rgba(248, 113, 113, 0.15)';
                 bannerColor = 'var(--danger)';
-            } else if (conn.interpretation.assessment.includes('REVISAR') || conn.interpretation.assessment.includes('SUSPICIOUS')) {
+            } else if (assessment.includes('REVISAR') || assessment.includes('SUSPICIOUS')) {
                 bannerBg = 'rgba(251, 191, 36, 0.15)';
                 bannerColor = 'var(--warning)';
             }
             banner.style.background = bannerBg;
             banner.style.color = bannerColor;
 
-            document.getElementById('modal_ip_block').querySelector('p').innerText = conn.interpretation.ip_desc;
-            document.getElementById('modal_port_block').querySelector('p').innerText = conn.interpretation.port_desc;
-            document.getElementById('modal_status_block').querySelector('p').innerText = conn.interpretation.status_desc;
-            document.getElementById('modal_danger_block').querySelector('p').innerText = conn.interpretation.explanation;
+            document.getElementById('modal_ip_block').querySelector('p').innerText = interp.ip_desc || '-';
+            document.getElementById('modal_port_block').querySelector('p').innerText = interp.port_desc || '-';
+            document.getElementById('modal_status_block').querySelector('p').innerText = interp.status_desc || '-';
+            document.getElementById('modal_danger_block').querySelector('p').innerText = interp.explanation || '-';
             
-            const recs = conn.interpretation.recommendations || [];
+            const recs = interp.recommendations || [];
             if (recs.length > 0) {
                 document.getElementById('modal_recommendation_block').querySelector('p').innerText = `• ${recs.join('\n• ')}`;
             } else {
                 document.getElementById('modal_recommendation_block').querySelector('p').innerText = lang === 'es' ? "No hay recomendaciones específicas." : "No specific recommendations.";
             }
             
-            document.getElementById('modal_educational_block').querySelector('p').innerText = conn.interpretation.educational || "-";
+            document.getElementById('modal_educational_block').querySelector('p').innerText = interp.educational || "-";
 
             document.getElementById('interpret_modal').classList.add('active');
+        }
+
+        function updateSecurityToggleBtn(enabled) {
+            const btn = document.getElementById('security_toggle_btn');
+            if (!btn) return;
+            const lang = localStorage.getItem('language') || 'en';
+            const t = translations[lang] || translations.en;
+            if (enabled) {
+                btn.style.background = 'rgba(52,211,153,0.15)';
+                btn.style.color = '#34d399';
+                btn.style.border = '1px solid #34d399';
+                btn.innerHTML = t.btn_sec_active;
+            } else {
+                btn.style.background = 'rgba(136,136,136,0.1)';
+                btn.style.color = '#888888';
+                btn.style.border = '1px solid #444444';
+                btn.innerHTML = t.btn_sec_inactive;
+            }
         }
 
         function closeModal() {
@@ -880,18 +1032,7 @@ let protoChart = null;
                 headers: { 'X-CSRF-Token': window.csrfToken }
             });
             const data = await res.json();
-            const btn = document.getElementById('security_toggle_btn');
-            if (data.enabled) {
-                btn.style.background = 'rgba(52,211,153,0.15)';
-                btn.style.color = '#34d399';
-                btn.style.border = '1px solid #34d399';
-                btn.innerHTML = '&#9679; ANALÍTICA ACTIVA';
-            } else {
-                btn.style.background = 'rgba(136,136,136,0.1)';
-                btn.style.color = '#888888';
-                btn.style.border = '1px solid #444444';
-                btn.innerHTML = '&#9675; ANALÍTICA DESACTIVADA';
-            }
+            updateSecurityToggleBtn(data.enabled);
         }
 
         async function installSnort() {
@@ -1061,6 +1202,7 @@ let protoChart = null;
                 no_conns: "No se encontraron conexiones que coincidan.",
                 nav_dashboard: "Dashboard",
                 nav_firewall: "Cortafuegos e IDS",
+                nav_intelligence: "Inteligencia de Amenazas",
                 nav_logs: "📄 Logs de Seguridad",
                 nav_config: "Configuración",
                 config_title: "Configuración del Sistema",
@@ -1115,7 +1257,27 @@ let protoChart = null;
                 modal_conn_state: "Estado de la Conexión",
                 modal_sec_analysis: "Análisis de Seguridad Detallado",
                 modal_recs: "Recomendaciones",
-                modal_edu: "Contexto Educativo"
+                modal_edu: "Contexto Educativo",
+                intel_dashboard_title: "Correlación de Inteligencia de Amenazas",
+                intel_feed_entries: "Entradas Indexadas",
+                intel_feeds_loaded: "Feeds Activos",
+                intel_match_count: "Coincidencias",
+                intel_status: "Estado del Motor",
+                intel_no_matches: "Sin coincidencias de inteligencia todavía.",
+                intel_title: "Motor de Inteligencia de Amenazas",
+                intel_subtitle: "Correlación local de puertos, IPs, dominios y TLDs",
+                intel_btn_active: "● MOTOR ACTIVO",
+                intel_btn_inactive: "○ MOTOR DESACTIVADO",
+                intel_reload_btn: "Recargar Feeds",
+                intel_last_reload: "Última Recarga",
+                intel_feeds_title: "Feeds Cargados",
+                intel_col_feed: "Feed",
+                intel_col_status: "Estado",
+                intel_col_entries: "Entradas",
+                intel_col_error: "Notas",
+                intel_alerts_title: "Alertas de Inteligencia en Vivo",
+                intel_loading: "Cargando feeds...",
+                intel_feed_hint: "Coloca feeds CSV o texto en <code>data/feeds/</code>. Copia <code>custom_blacklist.example.txt</code> a <code>custom_blacklist.txt</code> para bloques IP personalizados."
             },
             en: {
                 subtitle: "Network Security Analytics — DLP + NDR + NTA + Explanation Engine",
@@ -1137,6 +1299,7 @@ let protoChart = null;
                 no_conns: "No matching connections found.",
                 nav_dashboard: "Dashboard",
                 nav_firewall: "Firewall & IDS",
+                nav_intelligence: "Threat Intelligence",
                 nav_logs: "📄 Security Logs",
                 nav_config: "Settings",
                 config_title: "System Configuration",
@@ -1191,7 +1354,27 @@ let protoChart = null;
                 modal_conn_state: "Connection State",
                 modal_sec_analysis: "Detailed Security Analysis",
                 modal_recs: "Recommendations",
-                modal_edu: "Educational Context"
+                modal_edu: "Educational Context",
+                intel_dashboard_title: "Threat Intelligence Correlation",
+                intel_feed_entries: "Indexed Entries",
+                intel_feeds_loaded: "Active Feeds",
+                intel_match_count: "Matches",
+                intel_status: "Engine Status",
+                intel_no_matches: "No threat intelligence matches yet.",
+                intel_title: "Threat Intelligence Engine",
+                intel_subtitle: "Local feed correlation for ports, IPs, domains, and TLDs",
+                intel_btn_active: "● ENGINE ACTIVE",
+                intel_btn_inactive: "○ ENGINE DISABLED",
+                intel_reload_btn: "Reload Feeds",
+                intel_last_reload: "Last Reload",
+                intel_feeds_title: "Loaded Feeds",
+                intel_col_feed: "Feed",
+                intel_col_status: "Status",
+                intel_col_entries: "Entries",
+                intel_col_error: "Notes",
+                intel_alerts_title: "Live Intelligence Alerts",
+                intel_loading: "Loading feeds...",
+                intel_feed_hint: "Place CSV or text feeds under <code>data/feeds/</code>. Copy <code>custom_blacklist.example.txt</code> to <code>custom_blacklist.txt</code> for operator-defined IP blocks."
             }
         };
 
@@ -1284,6 +1467,10 @@ let protoChart = null;
                 connections: {
                     title: "Conexiones del Sistema Activas",
                     desc: "Tabla interactiva de flujos y sockets de red en tiempo real. Al hacer clic en cualquier fila, el Explanation Engine de TCPspecter traduce las variables de red (como puertos conocidos, DNS o ASN) a descripciones comprensibles para humanos."
+                },
+                intelligence: {
+                    title: "Inteligencia de Amenazas",
+                    desc: "Correlaciona conexiones y consultas DNS contra feeds locales: puertos maliciosos, nodos Tor, dominios sinkhole, proveedores DynDNS, TLDs de alto abuso y listas negras personalizadas del operador."
                 }
             },
             en: {
@@ -1326,6 +1513,10 @@ let protoChart = null;
                 connections: {
                     title: "Active Network Connections",
                     desc: "Real-time interactive sockets table. Clicking any row triggers TCPspecter's Explanation Engine to translate network attributes (such as ports, DNS, and ASN) into plain human-readable text."
+                },
+                intelligence: {
+                    title: "Threat Intelligence",
+                    desc: "Correlates live connections and DNS queries against local feeds: malicious ports, Tor exit nodes, sinkholed domains, dynamic DNS providers, high-abuse TLDs, and operator-defined blacklists."
                 }
             }
         };
@@ -1359,7 +1550,8 @@ let protoChart = null;
         // ── Logs SPA Functions ────────────────────────────────────────────
         async function fetchLogs() {
             try {
-                const res = await fetch('/api/logs');
+                const lang = localStorage.getItem('language') || 'en';
+                const res = await fetch(`/api/logs?lang=${encodeURIComponent(lang)}`);
                 allLogs = await res.json();
                 renderLogs();
             } catch (err) {
@@ -1493,9 +1685,15 @@ let protoChart = null;
 
             if (path === '/firewall') {
                 document.getElementById('view_firewall').style.display = 'block';
+                if (logsInterval) { clearInterval(logsInterval); logsInterval = null; }
+                fetchAndUpdateNow();
+            } else if (path === '/intelligence') {
+                document.getElementById('view_intelligence').style.display = 'block';
+                if (logsInterval) { clearInterval(logsInterval); logsInterval = null; }
                 fetchAndUpdateNow();
             } else if (path === '/configuration') {
                 document.getElementById('view_configuration').style.display = 'block';
+                if (logsInterval) { clearInterval(logsInterval); logsInterval = null; }
             } else if (path === '/logs') {
                 const viewLogs = document.getElementById('view_logs');
                 if (viewLogs) viewLogs.style.display = 'block';

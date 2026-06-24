@@ -18,13 +18,27 @@ TCPspecter stores all runtime configuration in `config.json` at the project root
   "TARPIT_PORT": 2222,
   "web_server_port": 8050,
   "webhook_url": "",
-  "webhook_secret": ""
+  "webhook_secret": "",
+  "INTELLIGENCE_ENABLED": true,
+  "INTELLIGENCE_FEED_DIR": "data/feeds"
 }
 ```
 
 ---
 
 ## Parameter Reference
+
+### `INTELLIGENCE_ENABLED`
+- **Type:** Boolean
+- **Default:** `true`
+- **Effect:** When `true`, TCPspecter cross-references live connections and DNS queries against local feeds in `INTELLIGENCE_FEED_DIR`. When `false`, only the legacy hard-coded C2 port set is used for port matching.
+
+### `INTELLIGENCE_FEED_DIR`
+- **Type:** String (path)
+- **Default:** `data/feeds`
+- **Effect:** Directory containing threat intelligence feed files. Can be relative to the project root or an absolute path. See [`data/feeds/README.md`](../../data/feeds/README.md).
+
+---
 
 ### `ACTIVE_RESPONSE_ENABLED`
 - **Type:** Boolean

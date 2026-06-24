@@ -97,10 +97,11 @@ def get_configured_port():
 
 _dns_alerts = []
 _dlp_alerts = []
+_intel_alerts = []
 _alerts_lock = threading.Lock()
 
 def _alert_callback(alert: SecurityAlert) -> None:
-    global _dns_alerts, _dlp_alerts
+    global _dns_alerts, _dlp_alerts, _intel_alerts
     with _alerts_lock:
         alert_dict = {
             "timestamp": alert.timestamp,
@@ -114,6 +115,10 @@ def _alert_callback(alert: SecurityAlert) -> None:
             _dns_alerts.append(alert_dict)
             if len(_dns_alerts) > 100:
                 _dns_alerts.pop(0)
+        elif alert.engine == "intelligence":
+            _intel_alerts.append(alert_dict)
+            if len(_intel_alerts) > 100:
+                _intel_alerts.pop(0)
         else:
             _dlp_alerts.append(alert_dict)
             if len(_dlp_alerts) > 100:
@@ -330,6 +335,7 @@ def get_dashboard_data(lang="en"):
     
     translated_dns_alerts = []
     translated_dlp_alerts = []
+    translated_intel_alerts = []
     with _alerts_lock:
         for alert in _dns_alerts:
             a_copy = alert.copy()
@@ -349,8 +355,42 @@ def get_dashboard_data(lang="en"):
             a_copy["description"] = translate_description(desc, lang)
             translated_dlp_alerts.append(a_copy)
 
+        for alert in _intel_alerts:
+            a_copy = alert.copy()
+            cat = a_copy.get("category", "")
+            desc = a_copy.get("description", "")
+            from core.interpreter import CATEGORY_TRANSLATIONS, translate_description
+            a_copy["category"] = CATEGORY_TRANSLATIONS.get(lang, {}).get(cat, cat)
+            a_copy["description"] = translate_description(desc, lang)
+            translated_intel_alerts.append(a_copy)
+
     scapy_metrics["dns_alerts"] = translated_dns_alerts
     scapy_metrics["dlp_alerts"] = translated_dlp_alerts
+
+    from core.intelligence_engine import get_engine
+    intel_stats = get_engine().get_stats()
+    intelligence_payload = {
+        "enabled": intel_stats.enabled,
+        "feed_dir": intel_stats.feed_dir,
+        "total_entries": intel_stats.total_entries,
+        "match_count": intel_stats.match_count,
+        "last_reload": intel_stats.last_reload,
+        "feeds": [
+            {
+                "name": f.name,
+                "loaded": f.loaded,
+                "entry_count": f.entry_count,
+                "error": f.error,
+            }
+            for f in intel_stats.feeds
+        ],
+        "recent_matches": translated_intel_alerts[-20:],
+        "live_alerts": translated_intel_alerts,
+    }
+
+    from core import zombie_detector
+    from core.traffic_analyzer import is_analyzer_running
+    scapy_metrics["sniffer_running"] = is_analyzer_running()
 
     return {
         "cpu": stats.get("cpu", 0.0),
@@ -360,6 +400,7 @@ def get_dashboard_data(lang="en"):
         "rx_speed": round(rx_speed, 2),
         "tx_speed": round(tx_speed, 2),
         "security": {
+            "enabled": zombie_detector.ADVANCED_SECURITY_ENABLED,
             "score": security_report.get("score", 0),
             "risk_level": risk_level,
             "findings": translated_findings,
@@ -370,5 +411,6 @@ def get_dashboard_data(lang="en"):
         "connections": conns,
         "snort": snort_status,
         "firewall": firewall_status,
-        "scapy": scapy_metrics
+        "scapy": scapy_metrics,
+        "intelligence": intelligence_payload,
     }

@@ -1,4 +1,6 @@
 {
   "virustotal_api_key": "YOUR_VIRUSTOTAL_API_KEY_HERE",
-  "web_server_port": 8050
+  "web_server_port": 8050,
+  "INTELLIGENCE_ENABLED": true,
+  "INTELLIGENCE_FEED_DIR": "data/feeds"
 }

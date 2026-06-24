@@ -52,6 +52,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 @app.get("/", response_class=HTMLResponse)
 @app.get("/firewall", response_class=HTMLResponse)
+@app.get("/intelligence", response_class=HTMLResponse)
 @app.get("/configuration", response_class=HTMLResponse)
 @app.get("/logs", response_class=HTMLResponse)
 async def serve_dashboard():
@@ -65,6 +66,56 @@ async def serve_dashboard():
 async def serve_tutorial():
     with open(os.path.join(TEMPLATES_DIR, "tutorial.html"), "r", encoding="utf-8") as f:
         return f.read()
+
+
+@app.get("/api/intelligence")
+async def api_intelligence():
+    from core.intelligence_engine import get_engine
+    stats = get_engine().get_stats()
+    return JSONResponse(content={
+        "enabled": stats.enabled,
+        "feed_dir": stats.feed_dir,
+        "total_entries": stats.total_entries,
+        "match_count": stats.match_count,
+        "last_reload": stats.last_reload,
+        "feeds": [
+            {
+                "name": f.name,
+                "path": f.path,
+                "loaded": f.loaded,
+                "entry_count": f.entry_count,
+                "last_loaded": f.last_loaded,
+                "error": f.error,
+            }
+            for f in stats.feeds
+        ],
+        "recent_matches": stats.recent_matches,
+    })
+
+@app.post("/api/intelligence/reload")
+async def api_intelligence_reload(request: Request):
+    token = request.headers.get("X-CSRF-Token")
+    if not validate_csrf_token(token):
+        raise HTTPException(status_code=403, detail="Invalid CSRF token")
+    if not check_rate_limit(request.client.host if request.client else "127.0.0.1"):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
+    from core.intelligence_engine import initialize_intelligence
+    stats = initialize_intelligence()
+    return JSONResponse(content={
+        "success": True,
+        "total_entries": stats.total_entries,
+        "last_reload": stats.last_reload,
+    })
+
+@app.post("/api/intelligence/toggle")
+async def api_intelligence_toggle(request: Request):
+    token = request.headers.get("X-CSRF-Token")
+    if not validate_csrf_token(token):
+        raise HTTPException(status_code=403, detail="Invalid CSRF token")
+    from core.intelligence_engine import get_engine
+    engine = get_engine()
+    engine.set_enabled(not engine.enabled)
+    return JSONResponse(content={"enabled": engine.enabled})
 
 @app.get("/api/data")
 async def api_data(lang: str = "en"):
@@ -163,9 +214,12 @@ async def api_firewall_rules(request: Request):
 @app.websocket("/api/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
+    lang = websocket.query_params.get("lang", "en")
+    if lang not in ("en", "es"):
+        lang = "en"
     try:
         while True:
-            data = get_dashboard_data("en")
+            data = get_dashboard_data(lang)
             await websocket.send_json(data)
             await asyncio.sleep(2)
     except WebSocketDisconnect:
@@ -174,6 +228,12 @@ async def websocket_endpoint(websocket: WebSocket):
 def start_web_server(port=None):
     if port is None:
         port = get_configured_port()
+
+    try:
+        from core.intelligence_engine import initialize_intelligence
+        initialize_intelligence()
+    except Exception:
+        log.exception("Failed to initialize threat intelligence engine")
 
     _sec_thread = threading.Thread(target=_security_worker, daemon=True)
     _sec_thread.start()

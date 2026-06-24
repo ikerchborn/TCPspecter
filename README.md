@@ -30,14 +30,14 @@ TCPspecter is not a passive sniffer. At its core is an **asynchronous, decoupled
 ```text
   [Snort IDS]  ──┐
   [Scapy DPI]  ──┼──→ alerts.publish() ──→ [ Alert Bus (Queue) ] ──→ [ Web Dashboard / TUI ]
-  [Proc Maps]  ──┘                                  │
-                                                    ├──→ ECS JSON → security_alerts.json
-                                                    ├──→ Text Log → security_events.log
-                                                    └──→ HMAC-Signed Webhooks (SOAR)
+  [Proc Maps]  ──┘         ▲                       │
+  [Intel Feeds]────────────┘                       ├──→ ECS JSON → security_alerts.json
+                                                   ├──→ Text Log → security_events.log
+                                                   └──→ HMAC-Signed Webhooks (SOAR)
 ```
 
 **Key Architectural Properties:**
-1. **No circular imports** — Detection engines (`zombie_detector`, `scapy_engine`, `snort_manager`) only call `alerts.publish()`. They have zero knowledge of the web server or TUI.
+1. **No circular imports** — Detection engines (`zombie_detector`, `traffic_analyzer`, `snort_manager`, `intelligence_engine`) only call `alerts.publish()`. They have zero knowledge of the web server or TUI.
 2. **ECS v1.12 compliance** — Every `SecurityAlert` is serialized to Elastic Common Schema JSON, making logs immediately ingestible by Wazuh, Splunk, or ELK without custom parsers.
 3. **Compliance tagging** — Each alert carries embedded NIST CSF (e.g., `DE.CM-7`, `PR.DS-5`) and ISO/IEC 27001 control tags (e.g., `A.12.6.1`, `A.13.1.1`) for continuous compliance auditing.
 
@@ -55,6 +55,21 @@ TCPspecter is not a passive sniffer. At its core is an **asynchronous, decoupled
 | **Zombie Process Detector** | Identifies processes executing from suspicious paths (`/tmp`, `/dev/shm`), deleted binaries, or SUID binaries with active network sockets | T1059, T1070.004 |
 | **Process Masquerading** | Detects processes mimicking legitimate system service names while running from non-standard paths | T1036.005 |
 | **Mass Connection Scan** | Flags processes opening abnormal numbers of concurrent outbound connections (with a whitelist for browsers, dev tools) | T1046 |
+| **Threat Intelligence Correlation** | Cross-references live connections and DNS against local feeds: malicious ports, Tor exits, sinkholes, DynDNS, suspicious TLDs, custom blacklists | T1071, T1090, T1568 |
+
+### 🧠 Threat Intelligence Engine
+
+| Feature | Description |
+|---------|-------------|
+| **Local Feed Loader** | Loads CSV/text feeds from `data/feeds/` — no external API required for correlation |
+| **Port Intelligence** | 30+ flagged C2, RAT, miner, and proxy ports with confidence scores and MITRE mapping |
+| **Tor Exit Detection** | Matches outbound IPs against a bundled Tor exit node list |
+| **DNS Feed Correlation** | Sinkholed domains, dynamic DNS providers, and high-abuse TLD detection |
+| **Custom Blacklist** | Operator-defined IP/CIDR block list (`custom_blacklist.txt`) |
+| **Service Catalog** | Enriches the Explanation Engine with threat-aware port labels |
+| **Hot Reload** | Reload feeds from the web UI or `POST /api/intelligence/reload` without restart |
+
+See [`docs/2_user_manual/threat_intelligence.md`](docs/2_user_manual/threat_intelligence.md) and [`data/feeds/README.md`](data/feeds/README.md) for feed formats and configuration.
 
 ### 🛡️ Response Engine (SOAR)
 
@@ -119,12 +134,16 @@ Edit the `config.json` file in the project root to customize behavior:
   "TARPIT_PORT": 2222,
   "web_server_port": 8050,
   "webhook_url": "",
-  "webhook_secret": ""
+  "webhook_secret": "",
+  "INTELLIGENCE_ENABLED": true,
+  "INTELLIGENCE_FEED_DIR": "data/feeds"
 }
 ```
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
+| `INTELLIGENCE_ENABLED` | bool | `true` | Master switch for threat feed correlation |
+| `INTELLIGENCE_FEED_DIR` | string | `data/feeds` | Path to local threat intelligence feed directory |
 | `ACTIVE_RESPONSE_ENABLED` | bool | `false` | Master switch for automated blocking. `false` = audit mode only |
 | `MANAGEMENT_IP_WHITELIST` | list | RFC 1918 ranges | IPs never blocked by automated response |
 | `webhook_url` | string | `""` | HTTP POST endpoint for HMAC-signed alert forwarding |
@@ -173,7 +192,8 @@ Access the SPA at `http://localhost:8050` — multiple views available via the t
 
 | Route | Description |
 |-------|-------------|
-| `/` | Main Dashboard: Risk score, protocol charts, alerts, active connections, geo map |
+| `/` | Main Dashboard: Risk score, protocol charts, alerts, threat intel summary, connections, geo map |
+| `/intelligence` | Threat Intelligence: Feed status, live matches, reload/toggle controls |
 | `/firewall` | Firewall & IDS: Rule Builder, active iptables/ufw policies, Snort status |
 | `/logs` | Security Log Viewer: Parsed `security_events.log` timeline |
 | `/configuration` | Settings: Language toggle (EN/ES), tutorial link |
@@ -192,7 +212,8 @@ docs/
 │   └── configuration.md         # config.json reference
 ├── 2_user_manual/
 │   ├── tui_navigation.md        # Complete TUI keyboard map and panel guide
-│   └── web_dashboard.md         # Web SPA views, XAI modal, Rule Builder
+│   ├── web_dashboard.md         # Web SPA views, XAI modal, Rule Builder
+│   └── threat_intelligence.md   # Threat feed engine, formats, API
 ├── 3_incident_response_playbooks/
 │   ├── playbook_dns_tunneling.md    # IR: DNS Tunneling / Data Exfiltration
 │   ├── playbook_c2_beaconing.md     # IR: Command & Control Beaconing

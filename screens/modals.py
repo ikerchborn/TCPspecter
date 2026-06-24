@@ -717,17 +717,27 @@ class FirewallModal(BaseAsciiModal):
             ip = self.query_one("#firewall_input", Input).value.strip()
             if ip:
                 from core.firewall_manager import block_ip, validate_ip
-                if validate_ip(ip):
-                    block_ip(ip)
+                if not validate_ip(ip):
+                    self.app.notify("IP inválida.", severity="warning")
+                elif block_ip(ip):
                     self.query_one("#firewall_input", Input).value = ""
+                    self.app.notify(f"IP {ip} bloqueada.", severity="information")
+                    self.refresh_rules()
+                else:
+                    self.app.notify(f"Error al bloquear {ip}. ¿Ejecutas como root?", severity="error")
                     self.refresh_rules()
         elif event.key in ("u", "U"):
             ip = self.query_one("#firewall_input", Input).value.strip()
             if ip:
                 from core.firewall_manager import unblock_ip, validate_ip
-                if validate_ip(ip):
-                    unblock_ip(ip)
+                if not validate_ip(ip):
+                    self.app.notify("IP inválida.", severity="warning")
+                elif unblock_ip(ip):
                     self.query_one("#firewall_input", Input).value = ""
+                    self.app.notify(f"IP {ip} desbloqueada.", severity="information")
+                    self.refresh_rules()
+                else:
+                    self.app.notify(f"Error al desbloquear {ip}.", severity="error")
                     self.refresh_rules()
 
 

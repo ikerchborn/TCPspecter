@@ -16,7 +16,8 @@ The dashboard uses **client-side routing** — clicking navigation links or usin
 
 | Route | Label | Content |
 |-------|-------|---------|
-| `http://localhost:8050/` | Dashboard | Risk score, protocol charts, alerts, connections table, geo map |
+| `http://localhost:8050/` | Dashboard | Risk score, protocol charts, alerts, threat intel summary, connections table, geo map |
+| `http://localhost:8050/intelligence` | Threat Intelligence | Feed status, live matches, reload/toggle controls |
 | `http://localhost:8050/firewall` | Firewall & IDS | Rule Builder, active firewall policies, Snort status |
 | `http://localhost:8050/logs` | Logs | Parsed security event timeline |
 | `http://localhost:8050/configuration` | Configuration | Language settings, tutorial link |
@@ -65,6 +66,22 @@ Sorted, filterable table of all active sockets from `psutil.net_connections()`. 
 - Risk evaluation badge
 
 **Click any row** to open the **Explanation Engine (XAI) modal** — TCPspecter automatically interprets the connection in plain language, explaining what the destination IP represents, what the port is used for, and what the connection state means, along with a risk assessment.
+
+---
+
+## Threat Intelligence View (`/intelligence`)
+
+Dedicated panel for the local threat correlation engine:
+
+- **Feed table** — shows each feed file, load status, entry count, and errors
+- **Session matches** — cumulative intelligence alerts since startup
+- **Live alerts** — scrolling list of port, IP, and DNS feed matches
+- **Reload Feeds** — re-reads all files from `data/feeds/` without restarting TCPspecter
+- **Toggle engine** — enable/disable correlation while keeping feeds loaded
+
+The main dashboard also includes a summary card with feed entry counts and the five most recent matches.
+
+See [`threat_intelligence.md`](threat_intelligence.md) for feed formats and API reference.
 
 ---
 

@@ -192,6 +192,18 @@ class MainScreen(Screen):
         except Exception as e:
             self.notify(f"[!] No se pudo iniciar el analizador Scapy: {e}", severity="warning")
 
+        # Load threat intelligence feeds
+        try:
+            from core.intelligence_engine import initialize_intelligence
+            stats = initialize_intelligence()
+            self.notify(
+                f"Threat intelligence loaded: {stats.total_entries} entries from {len(stats.feeds)} feeds",
+                severity="information",
+                timeout=4.0,
+            )
+        except Exception as e:
+            self.notify(f"[!] Threat intelligence feeds unavailable: {e}", severity="warning")
+
         # Focus the connection table on startup
         self.query_one("#connection_table").focus()
 
@@ -236,12 +248,14 @@ class MainScreen(Screen):
 
         # 4. Protocol distribution pie chart
         proto_dist = get_system_protocol_distribution()
-        # Filter out NO_ROOT marker before passing to pie chart
+        no_root = any(l == "NO_ROOT" for l, _ in proto_dist)
         pie_data = [(l, v) for l, v in proto_dist if l != "NO_ROOT" and v > 0]
-        if not pie_data:
-            # All zeros — likely no-root. Show placeholder
-            pie_data = [("TCP", 1), ("UDP", 1), ("LISTEN", 1)]
-        self.query_one("#proto_pie", AsciiPieChart).set_data(pie_data)
+        if no_root and not pie_data:
+            self.query_one("#proto_pie", AsciiPieChart).set_data([("SIN ROOT", 1)])
+        elif not pie_data:
+            self.query_one("#proto_pie", AsciiPieChart).set_data([("SIN DATOS", 1)])
+        else:
+            self.query_one("#proto_pie", AsciiPieChart).set_data(pie_data)
 
         # 5. Top CPU processes pie chart
         top_procs = get_top_processes_by_resource(processes, "cpu", limit=3)
@@ -611,12 +625,7 @@ class MainScreen(Screen):
             pt = self.query_one("#process_table", ProcessTable)
             ct = self.query_one("#connection_table", ConnectionTable)
 
-            snapshot_conns = []
-            for c in ct.raw_connections:
-                conn_copy = c.copy()
-                conn_copy["pid"] = self.selected_pid
-                conn_copy["name"] = self.selected_proc_name
-                snapshot_conns.append(conn_copy)
+            snapshot_conns = [c.copy() for c in ct.raw_connections]
 
             try:
                 export_report(path, fmt, pt.raw_processes, snapshot_conns)

@@ -1,0 +1,4 @@
+# Copy to custom_blacklist.txt to enable operator-defined IP/CIDR blocks.
+# Example:
+# 203.0.113.50
+# 198.51.100.0/24

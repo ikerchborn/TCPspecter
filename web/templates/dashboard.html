@@ -19,6 +19,7 @@
             <nav style="display:flex; gap:12px; margin-right: 16px; align-items: center;">
                 <a href="/" style="color: var(--text-main); text-decoration: none; font-size: 14px; font-weight: 600;" data-i18n="nav_dashboard">Dashboard</a>
                 <a href="/firewall" style="color: var(--text-main); text-decoration: none; font-size: 14px; font-weight: 600;" data-i18n="nav_firewall">Firewall & IDS</a>
+                <a href="/intelligence" style="color: var(--text-main); text-decoration: none; font-size: 14px; font-weight: 600;" data-i18n="nav_intelligence">Threat Intelligence</a>
                 <a href="/logs" style="color: var(--text-main); text-decoration: none; font-size: 14px; font-weight: 600;" data-i18n="nav_logs">Security Logs</a>
                 <a href="/configuration" style="color: var(--text-main); text-decoration: none; font-size: 14px; font-weight: 600;" data-i18n="nav_config">Configuración</a>
             </nav>
@@ -130,6 +131,32 @@
             <div id="dns_dlp_alerts" style="display: flex; flex-direction: column; gap: 8px;">
                 <div style="color: var(--text-muted); font-style: italic; text-align: center; margin-top: 20px; font-size: 12px;">No hay alertas en tiempo real de Scapy/DNS.</div>
             </div>
+        </div>
+    </div>
+
+    <!-- Threat Intelligence summary (dashboard) -->
+    <div class="card" style="display: flex; flex-direction: column; margin-bottom: 24px;" onclick="showModuleHelp('intelligence', event)">
+        <div class="card-title" data-i18n="intel_dashboard_title">Threat Intelligence Correlation</div>
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 12px;">
+            <div style="background: rgba(255,255,255,0.01); border: 1px solid var(--card-border); border-radius: 10px; padding: 10px; text-align: center;">
+                <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;" data-i18n="intel_feed_entries">Feed Entries</div>
+                <div id="intel_total_entries" style="font-size: 20px; font-weight: 700; color: var(--primary); margin-top: 4px;">0</div>
+            </div>
+            <div style="background: rgba(255,255,255,0.01); border: 1px solid var(--card-border); border-radius: 10px; padding: 10px; text-align: center;">
+                <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;" data-i18n="intel_feeds_loaded">Active Feeds</div>
+                <div id="intel_feeds_loaded" style="font-size: 20px; font-weight: 700; color: var(--accent); margin-top: 4px;">0</div>
+            </div>
+            <div style="background: rgba(255,255,255,0.01); border: 1px solid var(--card-border); border-radius: 10px; padding: 10px; text-align: center;">
+                <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;" data-i18n="intel_match_count">Total Matches</div>
+                <div id="intel_match_count" style="font-size: 20px; font-weight: 700; color: #fbbf24; margin-top: 4px;">0</div>
+            </div>
+            <div style="background: rgba(255,255,255,0.01); border: 1px solid var(--card-border); border-radius: 10px; padding: 10px; text-align: center;">
+                <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;" data-i18n="intel_status">Engine Status</div>
+                <div id="intel_status_badge" style="font-size: 14px; font-weight: 700; color: #34d399; margin-top: 6px;">ACTIVE</div>
+            </div>
+        </div>
+        <div style="flex: 1; overflow-y: auto; max-height: 140px;" id="intel_recent_matches">
+            <div style="color: var(--text-muted); font-style: italic; text-align: center; margin-top: 20px; font-size: 12px;" data-i18n="intel_no_matches">No threat intelligence matches yet.</div>
         </div>
     </div>
 
@@ -256,7 +283,7 @@
 
         <!-- Active Rules Table -->
         <div style="margin-top: 16px;">
-            <strong data-i18n="fw_active_rules_lbl" style="font-size: 14px; display: block; margin-bottom: 12px; color: var(--text-main);">Reglas Cortafuegos Activas:</strong>
+            <strong data-i18n="fw_active_rules_lbl" style="font-size: 14px; display: block; margin-bottom: 12px; color: var(--text-main);">IPs Bloqueadas (DROP/DENY):</strong>
             <div class="table-container" style="max-height: 250px; border: 1px solid var(--card-border); border-radius: 8px; overflow: hidden;">
                 <table style="font-size: 12px; width: 100%; border-collapse: collapse;">
                     <thead>
@@ -277,6 +304,70 @@
         </div>
         </div> <!-- End Firewall card -->
     </div> <!-- End View: Firewall -->
+
+    <!-- View: Threat Intelligence -->
+    <div id="view_intelligence" class="spa-view" style="display:none;">
+        <div class="card" style="margin-bottom: 24px;" onclick="showModuleHelp('intelligence', event)">
+            <div class="connections-header" style="margin-bottom: 16px; border-bottom: 1px solid var(--card-border); padding-bottom: 12px;">
+                <div class="connections-title">
+                    <h2 data-i18n="intel_title" style="font-size: 18px; color: var(--text-main); margin: 0;">Threat Intelligence Engine</h2>
+                    <p data-i18n="intel_subtitle" style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Local feed correlation for ports, IPs, domains, and TLDs</p>
+                </div>
+                <div style="display: flex; gap: 12px; align-items: center;">
+                    <button id="intel_toggle_btn" onclick="toggleIntelligence(); event.stopPropagation();"
+                        style="background: rgba(52,211,153,0.15); color: #34d399; border: 1px solid #34d399;
+                               padding: 6px 16px; border-radius: 8px; cursor: pointer; font-family: inherit;
+                               font-size: 13px; font-weight: 600;"
+                        data-i18n="intel_btn_active">● ENGINE ACTIVE</button>
+                    <button onclick="reloadIntelligenceFeeds(); event.stopPropagation();"
+                        style="background: rgba(74, 122, 157, 0.15); border: 1px solid var(--primary); color: var(--text-main);
+                               padding: 6px 16px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600;"
+                        data-i18n="intel_reload_btn">Reload Feeds</button>
+                </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 20px;">
+                <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--card-border); border-radius: 10px; padding: 16px;">
+                    <div style="font-size: 12px; color: var(--text-muted); text-transform: uppercase;" data-i18n="intel_feed_entries">Indexed Entries</div>
+                    <div id="intel_page_total" style="font-size: 28px; font-weight: 700; color: var(--primary); margin-top: 8px;">0</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--card-border); border-radius: 10px; padding: 16px;">
+                    <div style="font-size: 12px; color: var(--text-muted); text-transform: uppercase;" data-i18n="intel_match_count">Session Matches</div>
+                    <div id="intel_page_matches" style="font-size: 28px; font-weight: 700; color: #fbbf24; margin-top: 8px;">0</div>
+                </div>
+                <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--card-border); border-radius: 10px; padding: 16px;">
+                    <div style="font-size: 12px; color: var(--text-muted); text-transform: uppercase;" data-i18n="intel_last_reload">Last Reload</div>
+                    <div id="intel_page_reload" style="font-size: 14px; font-weight: 600; color: var(--text-main); margin-top: 12px;">—</div>
+                </div>
+            </div>
+
+            <h3 data-i18n="intel_feeds_title" style="font-size: 15px; margin-bottom: 12px;">Loaded Feeds</h3>
+            <div style="overflow-x: auto; margin-bottom: 24px;">
+                <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                    <thead>
+                        <tr style="border-bottom: 1px solid var(--card-border);">
+                            <th style="padding: 10px; text-align: left; color: var(--text-muted);" data-i18n="intel_col_feed">Feed</th>
+                            <th style="padding: 10px; text-align: left; color: var(--text-muted);" data-i18n="intel_col_status">Status</th>
+                            <th style="padding: 10px; text-align: left; color: var(--text-muted);" data-i18n="intel_col_entries">Entries</th>
+                            <th style="padding: 10px; text-align: left; color: var(--text-muted);" data-i18n="intel_col_error">Notes</th>
+                        </tr>
+                    </thead>
+                    <tbody id="intel_feeds_tbody">
+                        <tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:20px 0;" data-i18n="intel_loading">Loading feeds...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <h3 data-i18n="intel_alerts_title" style="font-size: 15px; margin-bottom: 12px;">Live Intelligence Alerts</h3>
+            <div id="intel_alerts_list" style="max-height: 320px; overflow-y: auto;">
+                <div style="color: var(--text-muted); font-style: italic; text-align: center; padding: 24px 0;" data-i18n="intel_no_matches">No threat intelligence matches yet.</div>
+            </div>
+
+            <p style="font-size: 12px; color: var(--text-muted); margin-top: 16px;" data-i18n="intel_feed_hint">
+                Place CSV or text feeds under <code>data/feeds/</code>. Copy <code>custom_blacklist.example.txt</code> to <code>custom_blacklist.txt</code> to add operator-defined IP blocks.
+            </p>
+        </div>
+    </div> <!-- End View: Intelligence -->
 
     <!-- View: Configuration -->
     <div id="view_configuration" class="spa-view" style="display:none;">

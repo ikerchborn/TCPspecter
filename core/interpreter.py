@@ -109,13 +109,23 @@ def interpret_connection(conn: dict, lang: str = "en") -> dict:
     # Try interpreting remote port first
     try:
         rport_val = int(raddr_port)
-        if rport_val in port_desc_dict:
+        from core.service_catalog import describe_port, lookup_service
+        catalog_desc = describe_port(rport_val, proto, lang)
+        if catalog_desc:
+            port_desc = catalog_desc
+        elif rport_val in port_desc_dict:
             port_desc = port_desc_dict[rport_val]
     except ValueError:
         # Fallback to local port if remote is unset
         try:
             lport_val = int(laddr_port)
-            if lport_val in port_desc_dict:
+            from core.service_catalog import describe_port, lookup_service
+            catalog_desc = describe_port(lport_val, proto, lang)
+            if catalog_desc:
+                port_desc = (
+                    f"Local: {catalog_desc}" if lang == "en" else f"Local: {catalog_desc}"
+                )
+            elif lport_val in port_desc_dict:
                 port_desc = (
                     f"Local: {port_desc_dict[lport_val]}"
                     if lang == "en"
@@ -291,7 +301,14 @@ CATEGORY_TRANSLATIONS = {
         "Memoria Fileless": "Memoria Fileless",
         "Permisos": "Permisos",
         "Error": "Error",
-        "Escaneo de Puertos": "Escaneo de Puertos"
+        "Escaneo de Puertos": "Escaneo de Puertos",
+        "Threat Port Match": "Puerto de Amenaza",
+        "Tor Exit Node": "Nodo Salida Tor",
+        "Sinkholed Infrastructure": "Infraestructura Sinkhole",
+        "Custom Blacklist Hit": "Lista Negra Personalizada",
+        "Dynamic DNS Provider": "Proveedor DNS Dinámico",
+        "Suspicious TLD": "TLD Sospechoso",
+        "Suspicious C2 Port": "Puerto C2/Sospechoso",
     },
     "en": {
         "Binario Eliminado": "Deleted Binary",
@@ -312,7 +329,14 @@ CATEGORY_TRANSLATIONS = {
         "Memoria Fileless": "Fileless Memory Injection",
         "Permisos": "Permissions Error",
         "Error": "System Error",
-        "Escaneo de Puertos": "Port Scan"
+        "Escaneo de Puertos": "Port Scan",
+        "Threat Port Match": "Threat Port Match",
+        "Tor Exit Node": "Tor Exit Node",
+        "Sinkholed Infrastructure": "Sinkholed Infrastructure",
+        "Custom Blacklist Hit": "Custom Blacklist Hit",
+        "Dynamic DNS Provider": "Dynamic DNS Provider",
+        "Suspicious TLD": "Suspicious TLD",
+        "Suspicious C2 Port": "Suspicious C2 Port",
     }
 }
 

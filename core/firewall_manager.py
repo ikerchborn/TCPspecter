@@ -217,7 +217,7 @@ def add_custom_rule(action: str, src_ip: str, dst_ip: str, port: int, protocol: 
 
     cmd = []
     if backend == "iptables":
-        cmd = ["sudo", "iptables", "-A", "INPUT"]
+        cmd = ["iptables", "-A", "INPUT"]
         if protocol != "all":
             cmd.extend(["-p", protocol])
         if safe_src:
@@ -228,9 +228,8 @@ def add_custom_rule(action: str, src_ip: str, dst_ip: str, port: int, protocol: 
             cmd.extend(["--dport", str(port_num)])
         cmd.extend(["-j", action])
     elif backend == "ufw":
-        # UFW syntax: sudo ufw allow/deny [proto <protocol>] [from <address> [port <port>]] [to <address> [port <port>]]
         action_ufw = "allow" if action == "ACCEPT" else "deny"
-        cmd = ["sudo", "ufw", action_ufw]
+        cmd = ["/usr/sbin/ufw", action_ufw]
         if safe_src:
             cmd.extend(["from", safe_src])
         if safe_dst:

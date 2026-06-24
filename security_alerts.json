@@ -114143,5 +114143,810 @@
         "A.13.1.1"
       ]
     }
+  },
+  {
+    "@timestamp": "2026-06-23T23:30:28Z",
+    "ecs": {
+      "version": "1.12.0"
+    },
+    "event": {
+      "kind": "alert",
+      "category": [
+        "intrusion_detection"
+      ],
+      "type": [
+        "indicator"
+      ],
+      "action": "detected",
+      "severity": 70,
+      "risk_score": 73,
+      "provider": "TCPspecter",
+      "dataset": "tcpspecter.security",
+      "module": "TÚNEL DNS"
+    },
+    "host": {
+      "name": "parrot",
+      "os": {
+        "family": "linux",
+        "platform": "linux"
+      }
+    },
+    "message": "Inundación DNS a 'google.com': 21 queries en 10s (posible túnel)",
+    "tcpspecter": {
+      "engine": "dns",
+      "status": "DETECTED",
+      "severity": "HIGH",
+      "category": "TÚNEL DNS"
+    },
+    "source": {
+      "ip": "lh3.google.com."
+    },
+    "destination": {
+      "ip": "port/53"
+    },
+    "threat": {
+      "framework": "MITRE ATT&CK",
+      "technique": {
+        "id": "T1071.004",
+        "name": "DNS (Application Layer Protocol)"
+      },
+      "tactic": {
+        "name": "Command and Control"
+      }
+    },
+    "compliance": {
+      "nist": [
+        "PR.PT-4"
+      ],
+      "iso": [
+        "A.13.1.1"
+      ]
+    }
+  },
+  {
+    "@timestamp": "2026-06-23T23:40:20Z",
+    "ecs": {
+      "version": "1.12.0"
+    },
+    "event": {
+      "kind": "alert",
+      "category": [
+        "intrusion_detection"
+      ],
+      "type": [
+        "indicator"
+      ],
+      "action": "detected",
+      "severity": 70,
+      "risk_score": 73,
+      "provider": "TCPspecter",
+      "dataset": "tcpspecter.security",
+      "module": "Atypical SSL Traffic"
+    },
+    "host": {
+      "name": "parrot",
+      "os": {
+        "family": "linux",
+        "platform": "linux"
+      }
+    },
+    "message": "Proceso desconocido (protonvpn-app) usando puerto HTTPS (443) hacia 185.159.159.148 (posible C2 beaconing).",
+    "tcpspecter": {
+      "engine": "protonvpn-app",
+      "status": "DETECTED",
+      "severity": "HIGH",
+      "category": "Atypical SSL Traffic"
+    },
+    "process": {
+      "name": "protonvpn-app",
+      "pid": 9734
+    },
+    "threat": {
+      "framework": "MITRE ATT&CK",
+      "technique": {
+        "id": "T1071.001",
+        "name": "Web Protocols (C2 over HTTPS)"
+      },
+      "tactic": {
+        "name": "Command and Control"
+      }
+    },
+    "compliance": {
+      "nist": [
+        "DE.AE-2"
+      ],
+      "iso": [
+        "A.13.1.1"
+      ]
+    }
+  },
+  {
+    "@timestamp": "2026-06-23T23:40:25Z",
+    "ecs": {
+      "version": "1.12.0"
+    },
+    "event": {
+      "kind": "alert",
+      "category": [
+        "intrusion_detection"
+      ],
+      "type": [
+        "info"
+      ],
+      "action": "resolved",
+      "severity": 70,
+      "risk_score": 73,
+      "provider": "TCPspecter",
+      "dataset": "tcpspecter.security",
+      "module": "Atypical SSL Traffic"
+    },
+    "host": {
+      "name": "parrot",
+      "os": {
+        "family": "linux",
+        "platform": "linux"
+      }
+    },
+    "message": "Proceso desconocido (protonvpn-app) usando puerto HTTPS (443) hacia 185.159.159.148 (posible C2 beaconing).",
+    "tcpspecter": {
+      "engine": "protonvpn-app",
+      "status": "RESOLVED",
+      "severity": "HIGH",
+      "category": "Atypical SSL Traffic"
+    },
+    "process": {
+      "name": "protonvpn-app",
+      "pid": 9734
+    }
+  },
+  {
+    "@timestamp": "2026-06-23T23:42:52Z",
+    "ecs": {
+      "version": "1.12.0"
+    },
+    "event": {
+      "kind": "alert",
+      "category": [
+        "intrusion_detection"
+      ],
+      "type": [
+        "indicator"
+      ],
+      "action": "detected",
+      "severity": 70,
+      "risk_score": 73,
+      "provider": "TCPspecter",
+      "dataset": "tcpspecter.security",
+      "module": "ALTA ENTROPÍA"
+    },
+    "host": {
+      "name": "parrot",
+      "os": {
+        "family": "linux",
+        "platform": "linux"
+      }
+    },
+    "message": "[Datos Cifrados/Ofuscados] Posible exfiltración (entropía=7.31/8.0) [109.176.239.69→192.168.9.102]",
+    "tcpspecter": {
+      "engine": "dlp",
+      "status": "DETECTED",
+      "severity": "HIGH",
+      "category": "ALTA ENTROPÍA"
+    },
+    "source": {
+      "ip": "109.176.239.69"
+    },
+    "destination": {
+      "ip": "192.168.9.102"
+    },
+    "threat": {
+      "framework": "MITRE ATT&CK",
+      "technique": {
+        "id": "T1048",
+        "name": "Exfiltration Over Alternative Protocol"
+      },
+      "tactic": {
+        "name": "Exfiltration"
+      }
+    },
+    "compliance": {
+      "nist": [
+        "PR.DS-5"
+      ],
+      "iso": [
+        "A.8.2.3"
+      ]
+    }
+  },
+  {
+    "@timestamp": "2026-06-24T00:13:02Z",
+    "ecs": {
+      "version": "1.12.0"
+    },
+    "event": {
+      "kind": "alert",
+      "category": [
+        "intrusion_detection"
+      ],
+      "type": [
+        "indicator"
+      ],
+      "action": "detected",
+      "severity": 70,
+      "risk_score": 73,
+      "provider": "TCPspecter",
+      "dataset": "tcpspecter.security",
+      "module": "Atypical SSL Traffic"
+    },
+    "host": {
+      "name": "parrot",
+      "os": {
+        "family": "linux",
+        "platform": "linux"
+      }
+    },
+    "message": "Proceso desconocido (protonvpn-app) usando puerto HTTPS (443) hacia 185.159.159.148 (posible C2 beaconing).",
+    "tcpspecter": {
+      "engine": "protonvpn-app",
+      "status": "DETECTED",
+      "severity": "HIGH",
+      "category": "Atypical SSL Traffic"
+    },
+    "process": {
+      "name": "protonvpn-app",
+      "pid": 9734
+    },
+    "threat": {
+      "framework": "MITRE ATT&CK",
+      "technique": {
+        "id": "T1071.001",
+        "name": "Web Protocols (C2 over HTTPS)"
+      },
+      "tactic": {
+        "name": "Command and Control"
+      }
+    },
+    "compliance": {
+      "nist": [
+        "DE.AE-2"
+      ],
+      "iso": [
+        "A.13.1.1"
+      ]
+    }
+  },
+  {
+    "@timestamp": "2026-06-24T00:13:07Z",
+    "ecs": {
+      "version": "1.12.0"
+    },
+    "event": {
+      "kind": "alert",
+      "category": [
+        "intrusion_detection"
+      ],
+      "type": [
+        "info"
+      ],
+      "action": "resolved",
+      "severity": 70,
+      "risk_score": 73,
+      "provider": "TCPspecter",
+      "dataset": "tcpspecter.security",
+      "module": "Atypical SSL Traffic"
+    },
+    "host": {
+      "name": "parrot",
+      "os": {
+        "family": "linux",
+        "platform": "linux"
+      }
+    },
+    "message": "Proceso desconocido (protonvpn-app) usando puerto HTTPS (443) hacia 185.159.159.148 (posible C2 beaconing).",
+    "tcpspecter": {
+      "engine": "protonvpn-app",
+      "status": "RESOLVED",
+      "severity": "HIGH",
+      "category": "Atypical SSL Traffic"
+    },
+    "process": {
+      "name": "protonvpn-app",
+      "pid": 9734
+    }
+  },
+  {
+    "@timestamp": "2026-06-24T00:24:14Z",
+    "ecs": {
+      "version": "1.12.0"
+    },
+    "event": {
+      "kind": "alert",
+      "category": [
+        "intrusion_detection"
+      ],
+      "type": [
+        "indicator"
+      ],
+      "action": "detected",
+      "severity": 70,
+      "risk_score": 73,
+      "provider": "TCPspecter",
+      "dataset": "tcpspecter.security",
+      "module": "Atypical SSL Traffic"
+    },
+    "host": {
+      "name": "parrot",
+      "os": {
+        "family": "linux",
+        "platform": "linux"
+      }
+    },
+    "message": "Proceso desconocido (https) usando puerto HTTPS (443) hacia 108.62.48.8 (posible C2 beaconing).",
+    "tcpspecter": {
+      "engine": "https",
+      "status": "DETECTED",
+      "severity": "HIGH",
+      "category": "Atypical SSL Traffic"
+    },
+    "process": {
+      "name": "https",
+      "pid": 36231
+    },
+    "threat": {
+      "framework": "MITRE ATT&CK",
+      "technique": {
+        "id": "T1071.001",
+        "name": "Web Protocols (C2 over HTTPS)"
+      },
+      "tactic": {
+        "name": "Command and Control"
+      }
+    },
+    "compliance": {
+      "nist": [
+        "DE.AE-2"
+      ],
+      "iso": [
+        "A.13.1.1"
+      ]
+    }
+  },
+  {
+    "@timestamp": "2026-06-24T00:24:19Z",
+    "ecs": {
+      "version": "1.12.0"
+    },
+    "event": {
+      "kind": "alert",
+      "category": [
+        "intrusion_detection"
+      ],
+      "type": [
+        "info"
+      ],
+      "action": "resolved",
+      "severity": 70,
+      "risk_score": 73,
+      "provider": "TCPspecter",
+      "dataset": "tcpspecter.security",
+      "module": "Atypical SSL Traffic"
+    },
+    "host": {
+      "name": "parrot",
+      "os": {
+        "family": "linux",
+        "platform": "linux"
+      }
+    },
+    "message": "Proceso desconocido (https) usando puerto HTTPS (443) hacia 108.62.48.8 (posible C2 beaconing).",
+    "tcpspecter": {
+      "engine": "https",
+      "status": "RESOLVED",
+      "severity": "HIGH",
+      "category": "Atypical SSL Traffic"
+    },
+    "process": {
+      "name": "https",
+      "pid": 36231
+    }
+  },
+  {
+    "@timestamp": "2026-06-24T00:32:06Z",
+    "ecs": {
+      "version": "1.12.0"
+    },
+    "event": {
+      "kind": "alert",
+      "category": [
+        "intrusion_detection"
+      ],
+      "type": [
+        "indicator"
+      ],
+      "action": "detected",
+      "severity": 70,
+      "risk_score": 73,
+      "provider": "TCPspecter",
+      "dataset": "tcpspecter.security",
+      "module": "Atypical SSL Traffic"
+    },
+    "host": {
+      "name": "parrot",
+      "os": {
+        "family": "linux",
+        "platform": "linux"
+      }
+    },
+    "message": "Proceso desconocido (cursor) usando puerto HTTPS (443) hacia 104.18.18.125 (posible C2 beaconing).",
+    "tcpspecter": {
+      "engine": "cursor",
+      "status": "DETECTED",
+      "severity": "HIGH",
+      "category": "Atypical SSL Traffic"
+    },
+    "process": {
+      "name": "cursor",
+      "pid": 36867
+    },
+    "threat": {
+      "framework": "MITRE ATT&CK",
+      "technique": {
+        "id": "T1071.001",
+        "name": "Web Protocols (C2 over HTTPS)"
+      },
+      "tactic": {
+        "name": "Command and Control"
+      }
+    },
+    "compliance": {
+      "nist": [
+        "DE.AE-2"
+      ],
+      "iso": [
+        "A.13.1.1"
+      ]
+    }
+  },
+  {
+    "@timestamp": "2026-06-24T00:32:06Z",
+    "ecs": {
+      "version": "1.12.0"
+    },
+    "event": {
+      "kind": "alert",
+      "category": [
+        "intrusion_detection"
+      ],
+      "type": [
+        "indicator"
+      ],
+      "action": "detected",
+      "severity": 70,
+      "risk_score": 73,
+      "provider": "TCPspecter",
+      "dataset": "tcpspecter.security",
+      "module": "Mass Connections"
+    },
+    "host": {
+      "name": "parrot",
+      "os": {
+        "family": "linux",
+        "platform": "linux"
+      }
+    },
+    "message": "Estableció conexiones simultáneas a 8 IPs públicas distintas (posible DDoS o escaneo)",
+    "tcpspecter": {
+      "engine": "cursor",
+      "status": "DETECTED",
+      "severity": "HIGH",
+      "category": "Mass Connections"
+    },
+    "process": {
+      "name": "cursor",
+      "pid": 36867
+    },
+    "threat": {
+      "framework": "MITRE ATT&CK",
+      "technique": {
+        "id": "T1046",
+        "name": "Network Service Discovery"
+      },
+      "tactic": {
+        "name": "Discovery"
+      }
+    },
+    "compliance": {
+      "nist": [
+        "DE.AE-2"
+      ],
+      "iso": [
+        "A.13.1.1"
+      ]
+    }
+  },
+  {
+    "@timestamp": "2026-06-24T00:32:06Z",
+    "ecs": {
+      "version": "1.12.0"
+    },
+    "event": {
+      "kind": "alert",
+      "category": [
+        "intrusion_detection"
+      ],
+      "type": [
+        "indicator"
+      ],
+      "action": "detected",
+      "severity": 70,
+      "risk_score": 73,
+      "provider": "TCPspecter",
+      "dataset": "tcpspecter.security",
+      "module": "Fileless Memory"
+    },
+    "host": {
+      "name": "parrot",
+      "os": {
+        "family": "linux",
+        "platform": "linux"
+      }
+    },
+    "message": "Se detectaron 1 regiones de memoria ejecutable anónima (sin respaldo en disco). Posible inyección de shellcode / malware fileless con red activa.",
+    "tcpspecter": {
+      "engine": "cursor",
+      "status": "DETECTED",
+      "severity": "HIGH",
+      "category": "Fileless Memory"
+    },
+    "process": {
+      "name": "cursor",
+      "pid": 38483
+    },
+    "threat": {
+      "framework": "MITRE ATT&CK",
+      "technique": {
+        "id": "T1055",
+        "name": "Process Injection"
+      },
+      "tactic": {
+        "name": "Defense Evasion"
+      }
+    },
+    "compliance": {
+      "nist": [
+        "DE.CM-7"
+      ],
+      "iso": [
+        "A.12.6.1"
+      ]
+    }
+  },
+  {
+    "@timestamp": "2026-06-24T00:32:06Z",
+    "ecs": {
+      "version": "1.12.0"
+    },
+    "event": {
+      "kind": "alert",
+      "category": [
+        "intrusion_detection"
+      ],
+      "type": [
+        "indicator"
+      ],
+      "action": "detected",
+      "severity": 70,
+      "risk_score": 73,
+      "provider": "TCPspecter",
+      "dataset": "tcpspecter.security",
+      "module": "Atypical SSL Traffic"
+    },
+    "host": {
+      "name": "parrot",
+      "os": {
+        "family": "linux",
+        "platform": "linux"
+      }
+    },
+    "message": "Proceso desconocido (cursor) usando puerto HTTPS (443) hacia 34.229.67.192 (posible C2 beaconing).",
+    "tcpspecter": {
+      "engine": "cursor",
+      "status": "DETECTED",
+      "severity": "HIGH",
+      "category": "Atypical SSL Traffic"
+    },
+    "process": {
+      "name": "cursor",
+      "pid": 38483
+    },
+    "threat": {
+      "framework": "MITRE ATT&CK",
+      "technique": {
+        "id": "T1071.001",
+        "name": "Web Protocols (C2 over HTTPS)"
+      },
+      "tactic": {
+        "name": "Command and Control"
+      }
+    },
+    "compliance": {
+      "nist": [
+        "DE.AE-2"
+      ],
+      "iso": [
+        "A.13.1.1"
+      ]
+    }
+  },
+  {
+    "@timestamp": "2026-06-24T00:32:06Z",
+    "ecs": {
+      "version": "1.12.0"
+    },
+    "event": {
+      "kind": "alert",
+      "category": [
+        "intrusion_detection"
+      ],
+      "type": [
+        "indicator"
+      ],
+      "action": "detected",
+      "severity": 90,
+      "risk_score": 95,
+      "provider": "TCPspecter",
+      "dataset": "tcpspecter.security",
+      "module": "Mass Connections"
+    },
+    "host": {
+      "name": "parrot",
+      "os": {
+        "family": "linux",
+        "platform": "linux"
+      }
+    },
+    "message": "Estableció conexiones simultáneas a 15 IPs públicas distintas (posible DDoS o escaneo)",
+    "tcpspecter": {
+      "engine": "cursor",
+      "status": "DETECTED",
+      "severity": "CRITICAL",
+      "category": "Mass Connections"
+    },
+    "process": {
+      "name": "cursor",
+      "pid": 38483
+    },
+    "threat": {
+      "framework": "MITRE ATT&CK",
+      "technique": {
+        "id": "T1046",
+        "name": "Network Service Discovery"
+      },
+      "tactic": {
+        "name": "Discovery"
+      }
+    },
+    "compliance": {
+      "nist": [
+        "DE.AE-2"
+      ],
+      "iso": [
+        "A.13.1.1"
+      ]
+    }
+  },
+  {
+    "@timestamp": "2026-06-24T00:32:06Z",
+    "ecs": {
+      "version": "1.12.0"
+    },
+    "event": {
+      "kind": "alert",
+      "category": [
+        "intrusion_detection"
+      ],
+      "type": [
+        "indicator"
+      ],
+      "action": "detected",
+      "severity": 70,
+      "risk_score": 73,
+      "provider": "TCPspecter",
+      "dataset": "tcpspecter.security",
+      "module": "Fileless Memory"
+    },
+    "host": {
+      "name": "parrot",
+      "os": {
+        "family": "linux",
+        "platform": "linux"
+      }
+    },
+    "message": "Se detectaron 2 regiones de memoria ejecutable anónima (sin respaldo en disco). Posible inyección de shellcode / malware fileless con red activa.",
+    "tcpspecter": {
+      "engine": "cursor",
+      "status": "DETECTED",
+      "severity": "HIGH",
+      "category": "Fileless Memory"
+    },
+    "process": {
+      "name": "cursor",
+      "pid": 39750
+    },
+    "threat": {
+      "framework": "MITRE ATT&CK",
+      "technique": {
+        "id": "T1055",
+        "name": "Process Injection"
+      },
+      "tactic": {
+        "name": "Defense Evasion"
+      }
+    },
+    "compliance": {
+      "nist": [
+        "DE.CM-7"
+      ],
+      "iso": [
+        "A.12.6.1"
+      ]
+    }
+  },
+  {
+    "@timestamp": "2026-06-24T00:32:06Z",
+    "ecs": {
+      "version": "1.12.0"
+    },
+    "event": {
+      "kind": "alert",
+      "category": [
+        "intrusion_detection"
+      ],
+      "type": [
+        "indicator"
+      ],
+      "action": "detected",
+      "severity": 70,
+      "risk_score": 73,
+      "provider": "TCPspecter",
+      "dataset": "tcpspecter.security",
+      "module": "Atypical SSL Traffic"
+    },
+    "host": {
+      "name": "parrot",
+      "os": {
+        "family": "linux",
+        "platform": "linux"
+      }
+    },
+    "message": "Proceso desconocido (cursor) usando puerto HTTPS (443) hacia 98.85.154.75 (posible C2 beaconing).",
+    "tcpspecter": {
+      "engine": "cursor",
+      "status": "DETECTED",
+      "severity": "HIGH",
+      "category": "Atypical SSL Traffic"
+    },
+    "process": {
+      "name": "cursor",
+      "pid": 39750
+    },
+    "threat": {
+      "framework": "MITRE ATT&CK",
+      "technique": {
+        "id": "T1071.001",
+        "name": "Web Protocols (C2 over HTTPS)"
+      },
+      "tactic": {
+        "name": "Command and Control"
+      }
+    },
+    "compliance": {
+      "nist": [
+        "DE.AE-2"
+      ],
+      "iso": [
+        "A.13.1.1"
+      ]
+    }
   }
 ]

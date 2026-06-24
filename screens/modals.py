@@ -714,21 +714,21 @@ class FirewallModal(BaseAsciiModal):
         if event.key == "escape":
             self.dismiss(None)
         elif event.key == "enter":
-            # Block IP typed in input
             ip = self.query_one("#firewall_input", Input).value.strip()
             if ip:
-                from core.firewall_manager import block_ip
-                block_ip(ip)
-                self.query_one("#firewall_input", Input).value = ""
-                self.refresh_rules()
+                from core.firewall_manager import block_ip, validate_ip
+                if validate_ip(ip):
+                    block_ip(ip)
+                    self.query_one("#firewall_input", Input).value = ""
+                    self.refresh_rules()
         elif event.key in ("u", "U"):
-            # Unblock IP typed in input
             ip = self.query_one("#firewall_input", Input).value.strip()
             if ip:
-                from core.firewall_manager import unblock_ip
-                unblock_ip(ip)
-                self.query_one("#firewall_input", Input).value = ""
-                self.refresh_rules()
+                from core.firewall_manager import unblock_ip, validate_ip
+                if validate_ip(ip):
+                    unblock_ip(ip)
+                    self.query_one("#firewall_input", Input).value = ""
+                    self.refresh_rules()
 
 
 class ConfirmInstallSnortModal(BaseAsciiModal):

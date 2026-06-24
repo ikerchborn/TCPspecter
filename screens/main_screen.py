@@ -821,7 +821,8 @@ class MainScreen(Screen):
             try:
                 row_key = ct.coordinate_to_cell_key((ct.cursor_row, 0)).row_key
                 parts = row_key.value.split("_")
-                if len(parts) >= 5:
+                # row key: pid_proto_laddr_ip_laddr_port_raddr_ip_raddr_port
+                if len(parts) >= 6:
                     ip_to_block = parts[4]
             except Exception:
                 pass

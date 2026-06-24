@@ -107,19 +107,42 @@ let protoChart = null;
             const ws = new WebSocket(wsUrl);
             
             ws.onmessage = (event) => {
-                const data = JSON.parse(event.data);
-                updateDashboard(data);
+                try {
+                    const data = JSON.parse(event.data);
+                    updateDashboard(data);
+                } catch(e) {
+                    console.error("WS parse error:", e);
+                }
             };
             
             ws.onerror = (error) => {
-                console.error("WebSocket Error:", error);
+                console.warn("WebSocket error, falling back to REST poll");
             };
             
             ws.onclose = () => {
                 console.warn("WebSocket closed. Reconnecting in 3s...");
                 setTimeout(initWebSocket, 3000);
             };
+
+            // Return ws so caller can reference it if needed
+            return ws;
         }
+
+        // Immediately fetch data via REST so views populate without waiting for first WS tick
+        async function fetchAndUpdateNow() {
+            try {
+                const lang = localStorage.getItem('language') || 'en';
+                const res = await fetch(`/api/data?lang=${lang}`);
+                if (!res.ok) return;
+                const data = await res.json();
+                await updateDashboard(data);
+            } catch (err) {
+                console.error('Initial REST fetch failed:', err);
+            }
+        }
+
+        // Alias used by firewall/snort action handlers
+        const refreshData = fetchAndUpdateNow;
 
         function resetMapView() {
             if (globeChart) {
@@ -334,8 +357,10 @@ let protoChart = null;
                     else if (c.proto === 'TCP') tc++;
                     else if (c.proto === 'UDP') uc++;
                 });
-                protoChart.data.datasets[0].data = [tc, uc, lc];
-                protoChart.update();
+                if (protoChart) {
+                    protoChart.data.datasets[0].data = [tc, uc, lc];
+                    protoChart.update();
+                }
 
                 // Process Pie Chart
                 let procCpuMap = {};
@@ -346,14 +371,16 @@ let protoChart = null;
                 });
                 const procLabels = Object.keys(procCpuMap);
                 const procValues = Object.values(procCpuMap);
-                if (procLabels.length > 0) {
-                    procChart.data.labels = procLabels;
-                    procChart.data.datasets[0].data = procValues;
-                } else {
-                    procChart.data.labels = ['Sin actividad'];
-                    procChart.data.datasets[0].data = [1];
+                if (procChart) {
+                    if (procLabels.length > 0) {
+                        procChart.data.labels = procLabels;
+                        procChart.data.datasets[0].data = procValues;
+                    } else {
+                        procChart.data.labels = ['Sin actividad'];
+                        procChart.data.datasets[0].data = [1];
+                    }
+                    procChart.update();
                 }
-                procChart.update();
 
                 // Bandwidth History Chart
                 const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -367,10 +394,12 @@ let protoChart = null;
                     bandwidthData.tx.shift();
                 }
 
-                bandwidthChart.data.labels = bandwidthData.labels;
-                bandwidthChart.data.datasets[0].data = bandwidthData.rx;
-                bandwidthChart.data.datasets[1].data = bandwidthData.tx;
-                bandwidthChart.update();
+                if (bandwidthChart) {
+                    bandwidthChart.data.labels = bandwidthData.labels;
+                    bandwidthChart.data.datasets[0].data = bandwidthData.rx;
+                    bandwidthChart.data.datasets[1].data = bandwidthData.tx;
+                    bandwidthChart.update();
+                }
 
                 // Entropy History Chart — use per-packet history from backend
                 if (data.scapy.entropy_history &&
@@ -403,6 +432,7 @@ let protoChart = null;
                 const toggleSnortBtn = document.getElementById('toggle_snort_btn');
                 const installBtn = document.getElementById('install_snort_btn');
                 
+                if (snortBadge && snortInfo && toggleSnortBtn && installBtn) {
                 if (!data.snort.installed) {
                     snortBadge.innerText = 'NO INSTALADO';
                     snortBadge.className = 'severity-badge sev-alto';
@@ -430,26 +460,29 @@ let protoChart = null;
                         toggleSnortBtn.style.color = 'var(--success)';
                     }
                 }
+                }
 
                 // Firewall blocked rules table update
                 const fwTbody = document.getElementById('firewall_tbody');
+                if (fwTbody) {
                 if (data.firewall.blocked_ips.length === 0) {
                     fwTbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--text-muted); padding: 20px 0; border-bottom: 1px solid var(--card-border);">Ninguna política activa encontrada.</td></tr>`;
                 } else {
                     fwTbody.innerHTML = data.firewall.blocked_ips.map(rule => {
                         return `
-                            <tr>
-                                <td><span class="severity-badge sev-critico">BLOCK</span></td>
-                                <td>${escapeHTML(rule.ip)}</td>
-                                <td><span class="severity-badge sev-bajo">${escapeHTML(rule.target || 'INPUT')}</span></td>
-                                <td style="text-align:right;">
-                                    <button class="btn btn-primary" style="padding:4px 8px;font-size:11px;background:rgba(255,255,255,0.05);border:1px solid var(--card-border);" onclick="unblockIP('${escapeHTML(rule.ip)}')">
-                                        Remove
-                                    </button>
+                            <tr style="border-bottom: 1px solid rgba(255,255,255,0.05); transition: background 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.02)'" onmouseout="this.style.background='transparent'">
+                                <td style="padding: 12px; font-weight: 600; color: var(--danger);">${escapeHTML(rule.ip)}</td>
+                                <td style="padding: 12px; color: var(--text-main);">${escapeHTML(rule.backend || data.firewall.backend || '-')}</td>
+                                <td style="padding: 12px; color: var(--text-main);">
+                                    <span style="background: rgba(248, 113, 113, 0.1); color: var(--danger); padding: 2px 6px; border-radius: 4px; font-size: 10px;">${escapeHTML(rule.target || 'INPUT')}</span>
+                                </td>
+                                <td style="padding: 12px;">
+                                    <button onclick="unblockIP('${escapeHTML(rule.ip)}')" style="background: rgba(52, 211, 153, 0.1); border: 1px solid var(--success); color: var(--success); padding: 4px 8px; border-radius: 4px; font-size: 11px; cursor: pointer; transition: all 0.2s;">Desbloquear</button>
                                 </td>
                             </tr>
                         `;
                     }).join('');
+                }
                 }
 
                 // Scapy Metrics and Alerts
@@ -672,7 +705,7 @@ let protoChart = null;
                 const isHighlighted = idx === 0 ? 'background: rgba(255, 255, 255, 0.03);' : '';
 
                 return `
-                    <tr style="${isHighlighted}" onclick="showConnectionModal(${escapeHTML(JSON.stringify(c).replace(/"/g, '&quot;'))})">
+                    <tr style="${isHighlighted}" onclick="showConnectionModal('${encodeURIComponent(JSON.stringify(c))}')">
                         <td><strong>${escapeHTML(nameText)}</strong></td>
                         <td>${escapeHTML(pidText)}</td>
                         <td>${escapeHTML(c.proto)}</td>
@@ -767,7 +800,19 @@ let protoChart = null;
             } else {
                 entry = connDataObj;
             }
-            // Logic to populate modal content...
+            if (!entry) return;
+            document.getElementById('modal_cat').innerText = entry.category || '-';
+            document.getElementById('modal_meta').innerText = `${entry.timestamp || '-'} | ${entry.severity || '-'} | ${entry.status || '-'}`;
+            document.getElementById('modal_desc_val').innerText = entry.description || '-';
+            const procParts = [];
+            if (entry.pid)       procParts.push(`PID: ${entry.pid}`);
+            if (entry.proc_name) procParts.push(`Process: ${entry.proc_name}`);
+            if (entry.exe_path)  procParts.push(`Executable: ${entry.exe_path}`);
+            if (entry.cmdline)   procParts.push(`Command: ${entry.cmdline}`);
+            document.getElementById('modal_proc_val').innerText = procParts.length > 0 ? procParts.join('\n') : 'N/A';
+            document.getElementById('modal_raw_val').innerText = JSON.stringify(entry, null, 2);
+            const logModal = document.getElementById('log_modal');
+            if (logModal) logModal.style.display = 'flex';
         }
 
         // Close log_modal when clicking outside the content box
@@ -1399,6 +1444,8 @@ let protoChart = null;
             if (path === '/firewall') {
                 document.getElementById('view_firewall').style.display = 'block';
                 if (sharedMonitoring) sharedMonitoring.style.display = 'block';
+                // Immediately refresh data so firewall table populates without waiting for WS
+                fetchAndUpdateNow();
             } else if (path === '/configuration') {
                 document.getElementById('view_configuration').style.display = 'block';
                 if (sharedMonitoring) sharedMonitoring.style.display = 'none';
@@ -1419,10 +1466,12 @@ let protoChart = null;
             }
         }
 
-        window.onload = () => {
+        window.onload = async () => {
             initCharts();
             initGlobe();
             initWebSocket();
             applyLanguage();
             handleRouting(); // Render the correct SPA view based on URL
+            // Immediately populate all views without waiting for first WS message
+            await fetchAndUpdateNow();
         };

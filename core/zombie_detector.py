@@ -85,8 +85,24 @@ WHITELISTED_MASS_CONN_PROCS = {
     "slack", "discord", "spotify", "thunderbird", "steam", "dropbox",
     "teams", "zoom", "vscode", "code", "curl", "wget", "git", "npm", 
     "pip", "docker", "rustc", "cargo", "go", "gopls", "rust-analyzer",
-    "language_server", "language-server", "pyright", "tsserver", "node", "nodejs"
+    "language_server", "language-server", "pyright", "tsserver", "node", "nodejs",
+    "cursor", "electron", "python", "python3", "uvicorn", "gunicorn", "tcpspecter",
 }
+
+# Prefix match for process names like "Cursor Helper" or "python3.11"
+TRUSTED_NETWORK_PROC_PREFIXES = (
+    "cursor", "electron", "firefox", "chrome", "chromium", "microsoft-edge",
+    "msedge", "brave", "python", "node", "code", "vscode", "uvicorn",
+)
+
+def _is_trusted_network_proc(proc_name: str) -> bool:
+    """Return True for browsers, IDEs, and other legitimately multi-connection apps."""
+    name = (proc_name or "").lower().strip()
+    if not name:
+        return False
+    if name in WHITELISTED_MASS_CONN_PROCS:
+        return True
+    return any(name.startswith(prefix) for prefix in TRUSTED_NETWORK_PROC_PREFIXES)
 
 # SUID binaries that are known to be safe or standard network/system tools
 TRUSTED_SUID_BINARIES = {
@@ -523,10 +539,7 @@ def analyze_zombie_status(force=False) -> dict:
                 pass
 
             # --- 4e. Atypical SSL Connection (Port 443 Spoofing) ---
-            TRUSTED_SSL_PROCS = WHITELISTED_MASS_CONN_PROCS | {
-                "git", "curl", "wget", "ssh", "systemd", "apt-get", "dpkg", "snapd", "flatpak", "python", "python3"
-            }
-            if conns and proc_name.lower() not in TRUSTED_SSL_PROCS:
+            if conns and not _is_trusted_network_proc(proc_name):
                 for conn in conns:
                     if conn.status == "ESTABLISHED" and conn.raddr:
                         rip = conn.raddr.ip
@@ -587,7 +600,7 @@ def analyze_zombie_status(force=False) -> dict:
                             }))
 
             # --- 6. Check for Mass Scanning or Spamming (Outbound Scaling) ---
-            if len(outbound_ips) >= 5 and proc_name.lower() not in WHITELISTED_MASS_CONN_PROCS:
+            if len(outbound_ips) >= 8 and not _is_trusted_network_proc(proc_name):
                 sev = "CRITICAL" if len(outbound_ips) >= 10 else "HIGH"
                 findings.append(_enrich_finding({
                     "category": "Mass Connections",
@@ -598,8 +611,7 @@ def analyze_zombie_status(force=False) -> dict:
                 }))
 
             # --- 7. C2 Beaconing Detection (Behavioral Multi-Signal Analysis) ---
-            # Like a senior analyst, we check if a process is calling home at regular intervals
-            if proc_name.lower() not in WHITELISTED_MASS_CONN_PROCS:
+            if not _is_trusted_network_proc(proc_name):
                 is_beaconing, regularity, target_ip = _analyze_beaconing(pid)
                 if is_beaconing and target_ip:
                     findings.append(_enrich_finding({

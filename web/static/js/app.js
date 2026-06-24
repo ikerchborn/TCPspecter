@@ -18,6 +18,16 @@ let protoChart = null;
         const LOGS_ITEMS_PER_PAGE = 100;
         let logsInterval = null;
 
+        function escapeHTML(str) {
+            if (str == null) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
         async function initGlobe() {
             try {
                 // Fetch self-geo first
@@ -283,11 +293,17 @@ let protoChart = null;
 
         let currentFirewallBackend = 'none';
 
-        async function updateDashboard(data) {
-            try {
-                currentFirewallBackend = data.firewall.backend;
+        function isDashboardRoute() {
+            const path = window.location.pathname;
+            return path === '/' || path === '';
+        }
 
-                // Update CPU & RAM headers
+        async function updateDashboard(data) {
+            if (!data) return;
+
+            // Header stats — always available
+            try {
+                currentFirewallBackend = data.firewall?.backend || 'none';
                 const cpuEl = document.getElementById('sys_cpu');
                 const ramEl = document.getElementById('sys_ram');
                 if (cpuEl) cpuEl.innerText = `${data.cpu.toFixed(1)}%`;
@@ -296,38 +312,77 @@ let protoChart = null;
                     const totalGb = (data.total_ram / (1024 * 1024 * 1024)).toFixed(2);
                     ramEl.innerText = `${data.ram.toFixed(1)}% (${usedGb} GB / ${totalGb} GB)`;
                 }
+            } catch (err) {
+                console.error('Header stats update failed:', err);
+            }
 
+            // Dashboard-only widgets (security panel, charts, scapy)
+            if (isDashboardRoute()) {
+                try {
+                    await updateDashboardPanels(data);
+                } catch (err) {
+                    console.error('Dashboard panels update failed:', err);
+                }
+            }
+
+            // Firewall / Snort — available on dashboard and firewall routes
+            try {
+                await updateFirewallPanels(data);
+            } catch (err) {
+                console.error('Firewall panels update failed:', err);
+            }
+
+            // Map + connections table — dashboard only
+            if (isDashboardRoute()) {
+                try {
+                    await updateConnectionsAndMap(data);
+                } catch (err) {
+                    console.error('Connections/map update failed:', err);
+                }
+            }
+        }
+
+        async function updateDashboardPanels(data) {
                 // 1. Update Security Panel
-                document.getElementById('risk_score').innerText = data.security.score;
+                const riskScoreEl = document.getElementById('risk_score');
                 const circle = document.getElementById('risk_gradient');
+                if (!riskScoreEl || !circle) return;
+
+                riskScoreEl.innerText = data.security?.score ?? 0;
                 
                 // Color mapping
                 let riskColor = '#34d399';
                 let riskClass = 'sev-bajo';
-                if (data.security.score >= 60) {
+                const score = data.security?.score ?? 0;
+                if (score >= 60) {
                     riskColor = '#f87171';
                     riskClass = 'sev-critico';
-                } else if (data.security.score >= 35) {
+                } else if (score >= 35) {
                     riskColor = '#fbbf24';
                     riskClass = 'sev-alto';
-                } else if (data.security.score >= 15) {
+                } else if (score >= 15) {
                     riskColor = '#4a7a9d';
                     riskClass = 'sev-medio';
                 }
-                circle.style.background = `conic-gradient(${riskColor} ${data.security.score}%, #1e293b 0%)`;
+                circle.style.background = `conic-gradient(${riskColor} ${score}%, #1e293b 0%)`;
                 
                 const riskLevelEl = document.getElementById('risk_level');
-                riskLevelEl.innerText = data.security.risk_level;
-                riskLevelEl.className = `severity-badge ${riskClass}`;
+                if (riskLevelEl) {
+                    riskLevelEl.innerText = data.security?.risk_level ?? '-';
+                    riskLevelEl.className = `severity-badge ${riskClass}`;
+                }
 
-                document.getElementById('findings_count').innerText = data.security.findings.length;
+                const findingsCountEl = document.getElementById('findings_count');
+                const findings = data.security?.findings || [];
+                if (findingsCountEl) findingsCountEl.innerText = findings.length;
 
                 // 2. Update Alerts list
                 const alertsList = document.getElementById('alerts_list');
-                if (data.security.findings.length === 0) {
+                if (alertsList) {
+                if (findings.length === 0) {
                     alertsList.innerHTML = `<div style="color: var(--text-muted); font-style: italic; text-align: center; margin-top: 40px;">No se han detectado alertas de seguridad activas.</div>`;
                 } else {
-                    alertsList.innerHTML = data.security.findings.map(f => {
+                    alertsList.innerHTML = findings.map(f => {
                         let fclass = 'sev-bajo';
                         if (f.severity === 'CRITICAL') fclass = 'sev-critico';
                         else if (f.severity === 'HIGH') fclass = 'sev-alto';
@@ -348,11 +403,12 @@ let protoChart = null;
                         `;
                     }).join('');
                 }
+                }
 
                 // 3. Update Charts
                 // Protocol Pie Chart
                 let tc = 0, uc = 0, lc = 0;
-                data.connections.forEach(c => {
+                (data.connections || []).forEach(c => {
                     if (c.status === 'LISTEN') lc++;
                     else if (c.proto === 'TCP') tc++;
                     else if (c.proto === 'UDP') uc++;
@@ -364,7 +420,7 @@ let protoChart = null;
 
                 // Process Pie Chart
                 let procCpuMap = {};
-                data.processes.forEach(p => {
+                (data.processes || []).forEach(p => {
                     if (p.cpu > 0) {
                         procCpuMap[p.name] = (procCpuMap[p.name] || 0) + p.cpu;
                     }
@@ -402,19 +458,18 @@ let protoChart = null;
                 }
 
                 // Entropy History Chart — use per-packet history from backend
-                if (data.scapy.entropy_history &&
-                    data.scapy.entropy_history.labels &&
-                    data.scapy.entropy_history.labels.length > 0) {
-                    // Use real per-packet data from backend
+                const scapy = data.scapy || {};
+                if (scapy.entropy_history &&
+                    scapy.entropy_history.labels &&
+                    scapy.entropy_history.labels.length > 0) {
                     if (entropyChart) {
-                        entropyChart.data.labels = data.scapy.entropy_history.labels;
-                        entropyChart.data.datasets[0].data = data.scapy.entropy_history.values;
+                        entropyChart.data.labels = scapy.entropy_history.labels;
+                        entropyChart.data.datasets[0].data = scapy.entropy_history.values;
                         entropyChart.update();
                     }
                 } else {
-                    // No real packets yet — push avg as placeholder so chart isn't empty
                     entropyHistoryData.labels.push(timeStr);
-                    entropyHistoryData.values.push(data.scapy.avg_entropy || 0);
+                    entropyHistoryData.values.push(scapy.avg_entropy || 0);
                     if (entropyHistoryData.labels.length > 15) {
                         entropyHistoryData.labels.shift();
                         entropyHistoryData.values.shift();
@@ -426,133 +481,138 @@ let protoChart = null;
                     }
                 }
 
-                // Snort Status Update
+                // Scapy Metrics and Alerts (dashboard only)
+                const scapyCountEl = document.getElementById('scapy_packet_count');
+                const scapyEntropyEl = document.getElementById('scapy_avg_entropy');
+                const dnsDlpAlerts = document.getElementById('dns_dlp_alerts');
+                if (scapyCountEl && scapyEntropyEl && dnsDlpAlerts && data.scapy) {
+                    scapyCountEl.innerText = data.scapy.stats?.packet_count ?? 0;
+                    scapyEntropyEl.innerText = (data.scapy.avg_entropy ?? 0).toFixed(2);
+
+                    const combinedAlerts = [
+                        ...(data.scapy.dns_alerts || []),
+                        ...(data.scapy.dlp_alerts || []),
+                    ];
+                    combinedAlerts.sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
+
+                    if (combinedAlerts.length === 0) {
+                        dnsDlpAlerts.innerHTML = `<div style="color: var(--text-muted); font-style: italic; text-align: center; margin-top: 20px; font-size: 12px;">No hay alertas en tiempo real de Scapy/DNS.</div>`;
+                    } else {
+                        dnsDlpAlerts.innerHTML = combinedAlerts.map(alert => {
+                            let color = '#fbbf24';
+                            let typeLabel = alert.category || 'ALERTA';
+
+                            if (typeLabel.includes('TÚNEL') || typeLabel.includes('ENTROPÍA') || typeLabel.includes('Reverse Shell')) {
+                                color = '#f87171';
+                            }
+
+                            const desc = alert.description;
+                            const queryInfo = alert.query ? ` [Query: ${alert.query}]` : '';
+
+                            return `
+                                <div style="background: rgba(255,255,255,0.02); padding: 8px; border-radius: 6px; border-left: 3px solid ${color}; font-size: 11px;">
+                                    <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
+                                        <span style="color: ${color}; font-weight: 600; text-transform: uppercase;">${escapeHTML(typeLabel)}</span>
+                                        <span style="color: var(--text-muted);">${escapeHTML(alert.timestamp)}</span>
+                                    </div>
+                                    <div style="color: var(--text-main); font-size: 12px;">${escapeHTML(desc)}${escapeHTML(queryInfo)}</div>
+                                </div>
+                            `;
+                        }).join('');
+                    }
+                }
+        }
+
+        async function updateFirewallPanels(data) {
                 const snortBadge = document.getElementById('snort_badge');
                 const snortInfo = document.getElementById('snort_info');
                 const toggleSnortBtn = document.getElementById('toggle_snort_btn');
                 const installBtn = document.getElementById('install_snort_btn');
-                
-                if (snortBadge && snortInfo && toggleSnortBtn && installBtn) {
-                if (!data.snort.installed) {
-                    snortBadge.innerText = 'NO INSTALADO';
-                    snortBadge.className = 'severity-badge sev-alto';
-                    snortInfo.innerText = 'Snort IDS no está instalado en el sistema.';
-                    installBtn.style.display = 'inline-block';
-                    toggleSnortBtn.style.display = 'none';
-                } else {
-                    installBtn.style.display = 'none';
-                    toggleSnortBtn.style.display = 'inline-block';
-                    if (data.snort.running) {
-                        snortBadge.innerText = 'ACTIVO';
-                        snortBadge.className = 'severity-badge sev-bajo';
-                        snortInfo.innerText = 'Snort está ejecutándose en modo pasivo IDS.';
-                        toggleSnortBtn.innerText = 'Detener Snort';
-                        toggleSnortBtn.style.background = 'rgba(248, 113, 113, 0.1)';
-                        toggleSnortBtn.style.borderColor = 'var(--danger)';
-                        toggleSnortBtn.style.color = 'var(--danger)';
+
+                if (snortBadge && snortInfo && toggleSnortBtn && installBtn && data.snort) {
+                    if (!data.snort.installed) {
+                        snortBadge.innerText = 'NO INSTALADO';
+                        snortBadge.className = 'severity-badge sev-alto';
+                        snortInfo.innerText = 'Snort IDS no está instalado en el sistema.';
+                        installBtn.style.display = 'inline-block';
+                        toggleSnortBtn.style.display = 'none';
                     } else {
-                        snortBadge.innerText = 'INACTIVO';
-                        snortBadge.className = 'severity-badge sev-medio';
-                        snortInfo.innerText = 'El servicio Snort está detenido.';
-                        toggleSnortBtn.innerText = 'Iniciar Snort';
-                        toggleSnortBtn.style.background = 'rgba(52, 211, 153, 0.1)';
-                        toggleSnortBtn.style.borderColor = 'var(--success)';
-                        toggleSnortBtn.style.color = 'var(--success)';
+                        installBtn.style.display = 'none';
+                        toggleSnortBtn.style.display = 'inline-block';
+                        if (data.snort.running) {
+                            snortBadge.innerText = 'ACTIVO';
+                            snortBadge.className = 'severity-badge sev-bajo';
+                            snortInfo.innerText = 'Snort está ejecutándose en modo pasivo IDS.';
+                            toggleSnortBtn.innerText = 'Detener Snort';
+                            toggleSnortBtn.style.background = 'rgba(248, 113, 113, 0.1)';
+                            toggleSnortBtn.style.borderColor = 'var(--danger)';
+                            toggleSnortBtn.style.color = 'var(--danger)';
+                        } else {
+                            snortBadge.innerText = 'INACTIVO';
+                            snortBadge.className = 'severity-badge sev-medio';
+                            snortInfo.innerText = 'El servicio Snort está detenido.';
+                            toggleSnortBtn.innerText = 'Iniciar Snort';
+                            toggleSnortBtn.style.background = 'rgba(52, 211, 153, 0.1)';
+                            toggleSnortBtn.style.borderColor = 'var(--success)';
+                            toggleSnortBtn.style.color = 'var(--success)';
+                        }
                     }
                 }
-                }
 
-                // Firewall blocked rules table update
                 const fwTbody = document.getElementById('firewall_tbody');
+                const blockedIps = data.firewall?.blocked_ips || [];
                 if (fwTbody) {
-                if (data.firewall.blocked_ips.length === 0) {
-                    fwTbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--text-muted); padding: 20px 0; border-bottom: 1px solid var(--card-border);">Ninguna política activa encontrada.</td></tr>`;
-                } else {
-                    fwTbody.innerHTML = data.firewall.blocked_ips.map(rule => {
-                        return `
-                            <tr style="border-bottom: 1px solid rgba(255,255,255,0.05); transition: background 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.02)'" onmouseout="this.style.background='transparent'">
-                                <td style="padding: 12px; font-weight: 600; color: var(--danger);">${escapeHTML(rule.ip)}</td>
-                                <td style="padding: 12px; color: var(--text-main);">${escapeHTML(rule.backend || data.firewall.backend || '-')}</td>
-                                <td style="padding: 12px; color: var(--text-main);">
-                                    <span style="background: rgba(248, 113, 113, 0.1); color: var(--danger); padding: 2px 6px; border-radius: 4px; font-size: 10px;">${escapeHTML(rule.target || 'INPUT')}</span>
-                                </td>
-                                <td style="padding: 12px;">
-                                    <button onclick="unblockIP('${escapeHTML(rule.ip)}')" style="background: rgba(52, 211, 153, 0.1); border: 1px solid var(--success); color: var(--success); padding: 4px 8px; border-radius: 4px; font-size: 11px; cursor: pointer; transition: all 0.2s;">Desbloquear</button>
-                                </td>
-                            </tr>
-                        `;
-                    }).join('');
+                    if (blockedIps.length === 0) {
+                        fwTbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--text-muted); padding: 20px 0; border-bottom: 1px solid var(--card-border);">Ninguna política activa encontrada.</td></tr>`;
+                    } else {
+                        fwTbody.innerHTML = blockedIps.map(rule => {
+                            return `
+                                <tr style="border-bottom: 1px solid rgba(255,255,255,0.05); transition: background 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.02)'" onmouseout="this.style.background='transparent'">
+                                    <td style="padding: 12px; font-weight: 600; color: var(--danger);">${escapeHTML(rule.ip)}</td>
+                                    <td style="padding: 12px; color: var(--text-main);">${escapeHTML(rule.backend || data.firewall.backend || '-')}</td>
+                                    <td style="padding: 12px; color: var(--text-main);">
+                                        <span style="background: rgba(248, 113, 113, 0.1); color: var(--danger); padding: 2px 6px; border-radius: 4px; font-size: 10px;">${escapeHTML(rule.target || 'INPUT')}</span>
+                                    </td>
+                                    <td style="padding: 12px;">
+                                        <button onclick="unblockIP('${escapeHTML(rule.ip)}')" style="background: rgba(52, 211, 153, 0.1); border: 1px solid var(--success); color: var(--success); padding: 4px 8px; border-radius: 4px; font-size: 11px; cursor: pointer; transition: all 0.2s;">Desbloquear</button>
+                                    </td>
+                                </tr>
+                            `;
+                        }).join('');
+                    }
                 }
-                }
+        }
 
-                // Scapy Metrics and Alerts
-                document.getElementById('scapy_packet_count').innerText = data.scapy.stats.packet_count;
-                document.getElementById('scapy_avg_entropy').innerText = data.scapy.avg_entropy.toFixed(2);
-                
-                const dnsDlpAlerts = document.getElementById('dns_dlp_alerts');
-                const combinedAlerts = [...data.scapy.dns_alerts, ...data.scapy.dlp_alerts];
-                
-                combinedAlerts.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-                
-                if (combinedAlerts.length === 0) {
-                    dnsDlpAlerts.innerHTML = `<div style="color: var(--text-muted); font-style: italic; text-align: center; margin-top: 20px; font-size: 12px;">No hay alertas en tiempo real de Scapy/DNS.</div>`;
-                } else {
-                    dnsDlpAlerts.innerHTML = combinedAlerts.map(alert => {
-                        let color = '#fbbf24'; 
-                        let typeLabel = alert.category || 'ALERTA';
-                        
-                        if (typeLabel.includes('TÚNEL') || typeLabel.includes('ENTROPÍA') || typeLabel.includes('Reverse Shell')) {
-                            color = '#f87171';
-                        }
-                        
-                        const desc = alert.description;
-                        const queryInfo = alert.query ? ` [Query: ${alert.query}]` : '';
-                        
-                        return `
-                            <div style="background: rgba(255,255,255,0.02); padding: 8px; border-radius: 6px; border-left: 3px solid ${color}; font-size: 11px;">
-                                <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
-                                    <span style="color: ${color}; font-weight: 600; text-transform: uppercase;">${escapeHTML(typeLabel)}</span>
-                                    <span style="color: var(--text-muted);">${escapeHTML(alert.timestamp)}</span>
-                                </div>
-                                <div style="color: var(--text-main); font-size: 12px;">${escapeHTML(desc)}${escapeHTML(queryInfo)}</div>
-                            </div>
-                        `;
-                    }).join('');
-                }
-
-                // 4. Update Connections Table
-                allConnections = data.connections;
+        async function updateConnectionsAndMap(data) {
+                const connections = data.connections || [];
+                allConnections = connections;
                 filterTable();
 
-                // 5. Update Map Data (Traceroutes and Hops)
-                const uniqueRemoteIPs = [...new Set(data.connections.map(c => c.raddr_ip).filter(ip => ip && ip !== '-' && ip !== '0.0.0.0' && ip !== '127.0.0.1'))];
+                const uniqueRemoteIPs = [...new Set(connections.map(c => c.raddr_ip).filter(ip => ip && ip !== '-' && ip !== '0.0.0.0' && ip !== '127.0.0.1'))];
                 const fetchPromises = [];
-                
+
                 uniqueRemoteIPs.forEach(ip => {
-                    // Fetch traceroute hops
                     if (!tracerouteCache[ip]) {
                         tracerouteCache[ip] = 'fetching';
                         fetchPromises.push(
                             fetch(`/api/traceroute?ip=${ip}`).then(r => r.json()).then(hops => {
                                 tracerouteCache[ip] = hops || [];
-                                // Kick off geoip fetch for all new hops
                                 (hops || []).forEach(hop_ip => {
-                                    if(!geoIpCache[hop_ip]) {
+                                    if (!geoIpCache[hop_ip]) {
                                         geoIpCache[hop_ip] = 'fetching';
                                         fetchPromises.push(
                                             fetch(`/api/geoip?ip=${hop_ip}`).then(r => r.json()).then(geo => {
                                                 geoIpCache[hop_ip] = (geo && !geo.is_local) ? geo : 'local';
-                                            }).catch(()=> geoIpCache[hop_ip] = 'local')
+                                            }).catch(() => geoIpCache[hop_ip] = 'local')
                                         );
                                     }
                                 });
                             }).catch(() => {
-                                tracerouteCache[ip] = [ip]; // fallback to direct
+                                tracerouteCache[ip] = [ip];
                             })
                         );
                     }
-                    
-                    // Also make sure dest IP geo is fetching
+
                     if (!geoIpCache[ip]) {
                         geoIpCache[ip] = 'fetching';
                         fetchPromises.push(
@@ -569,105 +629,99 @@ let protoChart = null;
                     await Promise.all(fetchPromises);
                 }
 
-                if (globeChart && localGeo) {
-                    const linesData = [];
-                    const scatterData = [];
-                    
-                    // Center local node
-                    scatterData.push({ name: `${localGeo.city}, ${localGeo.country}`, ip: localGeo.ip || '127.0.0.1', value: [localGeo.lon, localGeo.lat], itemStyle: { color: '#4a7a9d' } });
+                if (!globeChart || !localGeo) return;
 
-                    data.connections.forEach(c => {
-                        const destIp = c.raddr_ip;
-                        if(destIp === '-' || destIp === '0.0.0.0' || destIp === '127.0.0.1') return;
-                        
-                        const destGeo = geoIpCache[destIp];
-                        if (destGeo && destGeo !== 'local' && destGeo !== 'fetching') {
-                            let color = '#34d399'; // Normal
-                            if (c.interpretation && c.interpretation.assessment.includes('CRÍTICO')) {
-                                color = '#f87171'; // Danger
-                            } else if (c.interpretation && c.interpretation.assessment.includes('REVISAR')) {
-                                color = '#fbbf24'; // Warning
-                            }
-                            
-                            // Add destination node
-                            scatterData.push({
-                                name: `${destGeo.city}, ${destGeo.country}`,
-                                ip: destIp,
-                                value: [destGeo.lon, destGeo.lat],
-                                itemStyle: { color: color }
-                            });
-                            
-                            // Build polyline coordinates
-                            const hops = tracerouteCache[destIp];
-                            let coords = [[localGeo.lon, localGeo.lat]];
-                            
-                            if (Array.isArray(hops)) {
-                                hops.forEach(hop_ip => {
-                                    const hGeo = geoIpCache[hop_ip];
-                                    if (hGeo && hGeo !== 'local' && hGeo !== 'fetching') {
-                                        coords.push([hGeo.lon, hGeo.lat]);
-                                        // Also add hop point to scatter so it glows too, but smaller
-                                        if (hop_ip !== destIp) {
-                                            scatterData.push({
-                                                name: `${hGeo.city}, ${hGeo.country} (Hop)`,
-                                                ip: hop_ip,
-                                                value: [hGeo.lon, hGeo.lat],
-                                                symbolSize: 3,
-                                                itemStyle: { color: '#4a7a9d' }
-                                            });
-                                        }
+                const linesData = [];
+                const scatterData = [];
+
+                scatterData.push({ name: `${localGeo.city}, ${localGeo.country}`, ip: localGeo.ip || '127.0.0.1', value: [localGeo.lon, localGeo.lat], itemStyle: { color: '#4a7a9d' } });
+
+                connections.forEach(c => {
+                    const destIp = c.raddr_ip;
+                    if (destIp === '-' || destIp === '0.0.0.0' || destIp === '127.0.0.1') return;
+
+                    const destGeo = geoIpCache[destIp];
+                    if (destGeo && destGeo !== 'local' && destGeo !== 'fetching') {
+                        let color = '#34d399';
+                        const assessment = (c.interpretation && c.interpretation.assessment) || '';
+                        if (assessment.includes('CRÍTICO') || assessment.includes('CRITICAL')) {
+                            color = '#f87171';
+                        } else if (assessment.includes('REVISAR') || assessment.includes('SUSPICIOUS')) {
+                            color = '#fbbf24';
+                        }
+
+                        scatterData.push({
+                            name: `${destGeo.city}, ${destGeo.country}`,
+                            ip: destIp,
+                            value: [destGeo.lon, destGeo.lat],
+                            itemStyle: { color: color }
+                        });
+
+                        const hops = tracerouteCache[destIp];
+                        let coords = [[localGeo.lon, localGeo.lat]];
+
+                        if (Array.isArray(hops)) {
+                            hops.forEach(hop_ip => {
+                                const hGeo = geoIpCache[hop_ip];
+                                if (hGeo && hGeo !== 'local' && hGeo !== 'fetching') {
+                                    coords.push([hGeo.lon, hGeo.lat]);
+                                    if (hop_ip !== destIp) {
+                                        scatterData.push({
+                                            name: `${hGeo.city}, ${hGeo.country} (Hop)`,
+                                            ip: hop_ip,
+                                            value: [hGeo.lon, hGeo.lat],
+                                            symbolSize: 3,
+                                            itemStyle: { color: '#4a7a9d' }
+                                        });
                                     }
-                                });
-                            }
-                            
-                            // Ensure destination is the last point if not already
-                            const lastCoord = coords[coords.length - 1];
-                            if (!lastCoord || lastCoord[0] !== destGeo.lon || lastCoord[1] !== destGeo.lat) {
-                                coords.push([destGeo.lon, destGeo.lat]);
-                            }
-
-                            linesData.push({
-                                coords: coords,
-                                lineStyle: { color: color }
+                                }
                             });
                         }
-                    });
 
-                    // Remove duplicates in scatterData by coordinates to avoid double rendering
-                    const uniqueScatter = [];
-                    const seenCoords = new Set();
-                    scatterData.forEach(pt => {
-                        const key = `${pt.value[0]},${pt.value[1]}`;
-                        if(!seenCoords.has(key)) {
-                            seenCoords.add(key);
-                            uniqueScatter.push(pt);
+                        const lastCoord = coords[coords.length - 1];
+                        if (!lastCoord || lastCoord[0] !== destGeo.lon || lastCoord[1] !== destGeo.lat) {
+                            coords.push([destGeo.lon, destGeo.lat]);
                         }
-                    });
 
-                    globeChart.setOption({
-                        series: [
-                            {
-                                type: 'lines',
-                                coordinateSystem: 'geo',
-                                data: linesData
-                            },
-                            {
-                                type: 'effectScatter',
-                                coordinateSystem: 'geo',
-                                data: uniqueScatter
-                            }
-                        ]
-                    });
-                }
+                        linesData.push({
+                            coords: coords,
+                            lineStyle: { color: color }
+                        });
+                    }
+                });
 
-            } catch (err) {
-                console.error("Error al refrescar información del backend:", err);
-            }
+                const uniqueScatter = [];
+                const seenCoords = new Set();
+                scatterData.forEach(pt => {
+                    const key = `${pt.value[0]},${pt.value[1]}`;
+                    if (!seenCoords.has(key)) {
+                        seenCoords.add(key);
+                        uniqueScatter.push(pt);
+                    }
+                });
+
+                globeChart.setOption({
+                    series: [
+                        {
+                            type: 'lines',
+                            coordinateSystem: 'geo',
+                            data: linesData
+                        },
+                        {
+                            type: 'effectScatter',
+                            coordinateSystem: 'geo',
+                            data: uniqueScatter
+                        }
+                    ]
+                });
         }
 
         function filterTable() {
-            const query = document.getElementById('search_bar').value.toLowerCase().trim();
+            const searchBar = document.getElementById('search_bar');
             const tbody = document.getElementById('connections_tbody');
+            if (!tbody) return;
+
+            const query = searchBar ? searchBar.value.toLowerCase().trim() : '';
             
             const filtered = allConnections.filter(c => {
                 if (!query) return true;
@@ -694,14 +748,13 @@ let protoChart = null;
                 else if (c.status === 'LISTEN') statusBadge = 'badge-listen';
 
                 let evalClass = 'sev-bajo';
-                if (c.interpretation.assessment.includes('CRÍTICO')) evalClass = 'sev-critico';
-                else if (c.interpretation.assessment.includes('REVISAR')) evalClass = 'sev-alto';
+                const assessment = (c.interpretation && c.interpretation.assessment) || '';
+                if (assessment.includes('CRÍTICO') || assessment.includes('CRITICAL')) evalClass = 'sev-critico';
+                else if (assessment.includes('REVISAR') || assessment.includes('SUSPICIOUS')) evalClass = 'sev-alto';
 
                 const nameText = c.name || '-';
                 const pidText = c.pid || '-';
-                const raddrRaw = c.raddr_ip;
-                const statusClass = c.status === 'ESTABLISHED' ? 'established' : 'other';
-                const raddrColor = c.interpretation.assessment.includes('CRÍTICO') ? '#f87171' : '#fff';
+                const raddrColor = (assessment.includes('CRÍTICO') || assessment.includes('CRITICAL')) ? '#f87171' : '#fff';
                 const isHighlighted = idx === 0 ? 'background: rgba(255, 255, 255, 0.03);' : '';
 
                 return `
@@ -714,7 +767,7 @@ let protoChart = null;
                         <td><span style="color: ${raddrColor};">${escapeHTML(c.raddr_ip)}</span></td>
                         <td>${escapeHTML(String(c.raddr_port))}</td>
                         <td><span class="badge-status ${statusBadge}">${escapeHTML(c.status)}</span></td>
-                        <td><span class="severity-badge ${evalClass}" style="padding: 2px 6px; font-size: 11px;">${escapeHTML(c.interpretation.assessment)}</span></td>
+                        <td><span class="severity-badge ${evalClass}" style="padding: 2px 6px; font-size: 11px;">${escapeHTML(assessment || '-')}</span></td>
                     </tr>
                 `;
             }).join('');
@@ -1431,7 +1484,6 @@ let protoChart = null;
             const path = window.location.pathname;
             document.querySelectorAll('.spa-view').forEach(v => v.style.display = 'none');
 
-            // Adjust header nav active states
             document.querySelectorAll('nav a').forEach(a => {
                 a.style.color = 'var(--text-main)';
                 if (a.getAttribute('href') === path) {
@@ -1439,36 +1491,26 @@ let protoChart = null;
                 }
             });
 
-            const sharedMonitoring = document.getElementById('shared_monitoring');
-
             if (path === '/firewall') {
                 document.getElementById('view_firewall').style.display = 'block';
-                if (sharedMonitoring) sharedMonitoring.style.display = 'block';
-                // Immediately refresh data so firewall table populates without waiting for WS
                 fetchAndUpdateNow();
             } else if (path === '/configuration') {
                 document.getElementById('view_configuration').style.display = 'block';
-                if (sharedMonitoring) sharedMonitoring.style.display = 'none';
             } else if (path === '/logs') {
                 const viewLogs = document.getElementById('view_logs');
                 if (viewLogs) viewLogs.style.display = 'block';
-                if (sharedMonitoring) sharedMonitoring.style.display = 'none';
-                // Start polling logs when the view is active
                 fetchLogs();
                 if (!logsInterval) logsInterval = setInterval(fetchLogs, 3000);
             } else {
-                // Default to dashboard
                 document.getElementById('view_dashboard').style.display = 'block';
-                if (sharedMonitoring) sharedMonitoring.style.display = 'block';
                 if (globeChart) globeChart.resize();
-                // Stop logs polling when leaving the logs view
                 if (logsInterval) { clearInterval(logsInterval); logsInterval = null; }
             }
         }
 
         window.onload = async () => {
             initCharts();
-            initGlobe();
+            await initGlobe();
             initWebSocket();
             applyLanguage();
             handleRouting(); // Render the correct SPA view based on URL

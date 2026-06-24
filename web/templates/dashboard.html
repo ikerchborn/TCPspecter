@@ -132,6 +132,59 @@
             </div>
         </div>
     </div>
+
+    <!-- Map & Connections (dashboard only) -->
+    <div id="shared_monitoring">
+
+    <!-- Cyber-Node Global Map Section -->
+    <div class="card" style="margin-bottom: 24px;" onclick="showModuleHelp('map', event)">
+        <div class="connections-header" style="margin-bottom: 0; display: flex; justify-content: space-between; align-items: center;">
+            <div class="connections-title">
+                <h2 data-i18n="map_title">Mapa Global de Conexiones</h2>
+                <p data-i18n="map_desc" style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Análisis de Nodos de Tráfico en Tiempo Real</p>
+            </div>
+            <button onclick="resetMapView(); event.stopPropagation();" style="background: rgba(74, 122, 157, 0.15); border: 1px solid var(--primary); color: var(--text-main); padding: 6px 14px; border-radius: 6px; font-size: 12px; cursor: pointer; font-weight: 600;" data-i18n="map_recenter_btn">Recentrar Mapa</button>
+        </div>
+        <div id="globeChart" style="width: 100%; height: 500px;"></div>
+    </div>
+
+    <!-- Active Connections Table Section -->
+    <div class="card" onclick="showModuleHelp('connections', event)">
+        <div class="connections-header">
+            <div class="connections-title">
+                <h2 data-i18n="conns_title">Conexiones del Sistema Activas</h2>
+                <p data-i18n="conns_desc" style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Selecciona cualquier fila para traducir e interpretar lo que está pasando en la red.</p>
+            </div>
+            <div class="search-box">
+                <input type="text" class="search-input" id="search_bar" placeholder="Buscar (proceso, PID, IP, puerto, estado)..." oninput="filterTable()">
+            </div>
+        </div>
+
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th data-i18n="hdr_proc">Proceso</th>
+                        <th data-i18n="hdr_pid">PID</th>
+                        <th data-i18n="hdr_proto">Proto</th>
+                        <th data-i18n="hdr_src_ip">IP Origen</th>
+                        <th data-i18n="hdr_src_port">Pto Orig.</th>
+                        <th data-i18n="hdr_dst_ip">IP Destino</th>
+                        <th data-i18n="hdr_dst_port">Pto Dest.</th>
+                        <th data-i18n="hdr_status">Estado</th>
+                        <th data-i18n="hdr_eval">Evaluación</th>
+                    </tr>
+                </thead>
+                <tbody id="connections_tbody">
+                    <tr>
+                        <td colspan="9" style="text-align: center; color: var(--text-muted); padding: 40px 0;" data-i18n="conns_loading">Cargando conexiones del sistema...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+    </div> <!-- End Shared Monitoring -->
+
 </div> <!-- End View: Dashboard -->
 
     <!-- View: Firewall -->
@@ -224,58 +277,6 @@
         </div>
         </div> <!-- End Firewall card -->
     </div> <!-- End View: Firewall -->
-
-    <!-- Shared Map & Connections Container -->
-    <div id="shared_monitoring">
-
-    <!-- Cyber-Node Global Map Section -->
-    <div class="card" style="margin-bottom: 24px;" onclick="showModuleHelp('map', event)">
-        <div class="connections-header" style="margin-bottom: 0; display: flex; justify-content: space-between; align-items: center;">
-            <div class="connections-title">
-                <h2 data-i18n="map_title">Mapa Global de Conexiones</h2>
-                <p data-i18n="map_desc" style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Análisis de Nodos de Tráfico en Tiempo Real</p>
-            </div>
-            <button onclick="resetMapView(); event.stopPropagation();" style="background: rgba(74, 122, 157, 0.15); border: 1px solid var(--primary); color: var(--text-main); padding: 6px 14px; border-radius: 6px; font-size: 12px; cursor: pointer; font-weight: 600;" data-i18n="map_recenter_btn">Recentrar Mapa</button>
-        </div>
-        <div id="globeChart" style="width: 100%; height: 500px;"></div>
-    </div>
-
-    <!-- Active Connections Table Section -->
-    <div class="card" onclick="showModuleHelp('connections', event)">
-        <div class="connections-header">
-            <div class="connections-title">
-                <h2 data-i18n="conns_title">Conexiones del Sistema Activas</h2>
-                <p data-i18n="conns_desc" style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Selecciona cualquier fila para traducir e interpretar lo que está pasando en la red.</p>
-            </div>
-            <div class="search-box">
-                <input type="text" class="search-input" id="search_bar" placeholder="Buscar (proceso, PID, IP, puerto, estado)..." oninput="filterTable()">
-            </div>
-        </div>
-
-        <div class="table-container">
-            <table>
-                <thead>
-                    <tr>
-                        <th data-i18n="hdr_proc">Proceso</th>
-                        <th data-i18n="hdr_pid">PID</th>
-                        <th data-i18n="hdr_proto">Proto</th>
-                        <th data-i18n="hdr_src_ip">IP Origen</th>
-                        <th data-i18n="hdr_src_port">Pto Orig.</th>
-                        <th data-i18n="hdr_dst_ip">IP Destino</th>
-                        <th data-i18n="hdr_dst_port">Pto Dest.</th>
-                        <th data-i18n="hdr_status">Estado</th>
-                        <th data-i18n="hdr_eval">Evaluación</th>
-                    </tr>
-                </thead>
-                <tbody id="connections_tbody">
-                    <tr>
-                        <td colspan="9" style="text-align: center; color: var(--text-muted); padding: 40px 0;" data-i18n="conns_loading">Cargando conexiones del sistema...</td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
-    </div>
-    </div> <!-- End Shared Monitoring -->
 
     <!-- View: Configuration -->
     <div id="view_configuration" class="spa-view" style="display:none;">
@@ -409,7 +410,7 @@
         </div>
     </div>
 
-    <script src="/static/js/app.js?v=4.1"></script>
+    <script src="/static/js/app.js?v=4.3"></script>
 
     <!-- Interactive Explanation Modal Overlay -->
     <div id="help_modal" onclick="if(event.target===this) closeHelpModal()" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.75); backdrop-filter: blur(6px); z-index: 10000; align-items: center; justify-content: center;">
